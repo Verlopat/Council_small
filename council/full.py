@@ -15,7 +15,7 @@ from council.bus import MessageCap
 from council.evidence import EvidenceRejected
 from council.extract import validate_anchor
 from council.judge import blind_ledger, enforce_verdict, judge_failure
-from council.models import Claim, ClaimStatus, Evidence, EvidenceKind, ResearchResult
+from council.models import Claim, ClaimStatus, Evidence, EvidenceKind, ResearchResult, Objection, AuthorResponse
 from council.moderator import Moderator
 from council.protocol import Message, Act
 from council.parse import item_list, string_list, require_string, OutputError
@@ -46,6 +46,8 @@ class FullCouncilRunner(CouncilRunner):
         self.coverage=[]
         self.verified=[]
         self.extra_obligations=[]
+        self.objections=[]
+        self.author_responses=[]
 
     def _anchors(self,p:dict,body:dict)->None:
         answer=body.get("answer") or p["approach"]
@@ -219,6 +221,67 @@ class FullCouncilRunner(CouncilRunner):
             peer=proposals[(i+1)%len(proposals)]["family"] if len(proposals)>1 else None
             if peer and peer!=p["family"]:
                 await self._extract_rival(p,peer)
+        # Independent peer review is not evidence. Authors may respond, but
+        # only the reviewer or a verifier can establish a correction.
+        for i,p in enumerate(proposals):
+            if len(proposals)<2 or self.budget.debate_remaining()<=1:break
+            peer=proposals[(i+1)%len(proposals)]["family"]
+            if peer==p["family"]:continue
+            review=await self._call(peer,"review",{
+                "question":question,"proposal":{"id":p["id"],"approach":p["approach"]},
+                "claims":[{"id":cid,"statement":self.ledger.claims[cid].statement}
+                          for cid in p["claim_ids"]]})
+            if not review:continue
+            try: rows=item_list(review,"objections")
+            except OutputError:continue
+            for raw_ob in rows:
+                try:
+                    claimed=require_string(raw_ob,"claim_id")
+                    cid=p["claim_map"].get(claimed,claimed)
+                    if cid not in p["claim_ids"]:continue
+                    obj=Objection("o"+str(len(self.objections)+1),p["id"],cid,peer,
+                        require_string(raw_ob,"issue"),
+                        require_string(raw_ob,"consequence"),
+                        require_string(raw_ob,"suggested_check"))
+                except (OutputError,ValueError):
+                    continue
+                self.objections.append(obj)
+                self.events.record("review_received",objection=asdict(obj))
+                try:
+                    self.moderator.submit(Message("review:"+obj.id,cid,Act.CHALLENGE,
+                        peer,peer,obj.issue[:2400],step_ref=obj.issue[:300]))
+                except (EvidenceRejected,MessageCap):
+                    self.warnings.append("Review challenge not delivered: "+obj.id)
+        for p in proposals:
+            if self.budget.debate_remaining()<=1:break
+            related=[o for o in self.objections if o.proposal_id==p["id"]]
+            if not related:continue
+            author=await self._call(p["family"],"revision",{
+                "original_approach":p["approach"],
+                "claims":[{"id":cid,"statement":self.ledger.claims[cid].statement}
+                          for cid in p["claim_ids"]],
+                "objections":[asdict(o) for o in related]})
+            if not author:continue
+            try:
+                if isinstance(author.get("revised_approach"),str):
+                    p["revised_approach"]=author["revised_approach"]
+                for item in item_list(author,"revised_claims"):
+                    cid=require_string(item,"claim_id")
+                    if cid not in p["claim_ids"]:continue
+                    changed=require_string(item,"statement")
+                    if changed!=self.ledger.claims[cid].statement:
+                        revised=self.ledger.revise(cid,changed)
+                        revised.source_span=None  # old anchor is no longer proof of the edit
+                        self.events.record("claim_revised",claim_id=cid,version=revised.version)
+                for item in item_list(author,"responses"):
+                    oid=require_string(item,"objection_id")
+                    if oid not in {o.id for o in related}:continue
+                    response=AuthorResponse(oid,require_string(item,"disposition"),
+                                            require_string(item,"explanation"))
+                    self.author_responses.append(response)
+                    self.events.record("author_response_received",response=asdict(response))
+            except (OutputError,ValueError):
+                self.warnings.append("Invalid author revision by "+p["family"])
         for claim in list(self.ledger.claims.values())[:self.max_claims]:
             if self.budget.debate_remaining()<1:break
             await self._translate_and_check(claim)
@@ -244,6 +307,31 @@ class FullCouncilRunner(CouncilRunner):
                 if hunter:
                     await self._hunt(claim,hunter,self.moderator.current_round)
             # No new verifier evidence => do not start further debate rounds.
+        # P4: at most one repair attempt for each remaining challenged claim.
+        # The rewritten claim loses its old evidence and requires fresh anchoring.
+        for c in list(self.ledger.claims.values())[:self.hunter_cap]:
+            if self.budget.debate_remaining()<=3:break
+            if c.status is not ClaimStatus.UNRESOLVED:continue
+            repairer=next((f for f in ("nemotron","command","gpt-oss")
+                           if f!=c.owner_family),None)
+            if not repairer:continue
+            suggestion=await self._call(repairer,"repair",{
+                "claim_id":c.id,"claim":c.statement,"assumptions":c.assumptions,
+                "obligations":self.extra_obligations})
+            if not suggestion or not isinstance(suggestion.get("revised_statement"),str):
+                continue
+            new_text=suggestion["revised_statement"].strip()
+            if not new_text or new_text==c.statement:continue
+            try:
+                self.moderator.submit(Message("repair:"+c.id,c.id,Act.REPAIR,
+                                             repairer,repairer,new_text[:2400]))
+            except (EvidenceRejected,MessageCap):
+                continue
+            next_claim=self.ledger.revise(c.id,new_text)
+            next_claim.source_span=None
+            self.events.record("claim_revised",claim_id=c.id,
+                               version=next_claim.version,repairer=repairer)
+            self.extra_obligations.append(c.id+": validate revised meaning and source anchor")
         brief=ResearchResult(research_question=question,
                              completion_status="partial")
         brief.hypotheses=list(dict.fromkeys(h for p in proposals for h in p["hypotheses"]))
@@ -254,6 +342,7 @@ class FullCouncilRunner(CouncilRunner):
         brief.proposed_approach=" | ".join(p["approach"] for p in proposals)
         brief.proof_obligations=list(dict.fromkeys(self.extra_obligations))
         brief.unresolved_objections=list(dict.fromkeys(self.coverage+
+            [o.id+": "+o.issue+" (not yet independently resolved)" for o in self.objections]+
             [c.id+": "+c.statement for c in self.ledger.claims.values()
              if c.status in {ClaimStatus.PROPOSED,ClaimStatus.UNRESOLVED}]))
         # Judge input is blind to authors, family IDs and raw model transcripts.
@@ -290,6 +379,8 @@ class FullCouncilRunner(CouncilRunner):
         brief.completion_status=("partial" if proposals else "unresolved")
         brief.limitations=list(dict.fromkeys(brief.limitations+self.warnings))
         result={"research_result":brief.to_dict(),"proposals":proposals,
+            "objections":[asdict(o) for o in self.objections],
+            "author_responses":[asdict(a) for a in self.author_responses],
             "claims":[asdict(c) for c in self.ledger.claims.values()],
             "evidence":[asdict(e) for e in self.ledger.evidence.values()],
             "verdict":verdict,"composition":asdict(composition),
