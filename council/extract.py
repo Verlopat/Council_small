@@ -59,11 +59,11 @@ def final_number(s: str) -> str | None:
     if not lines:
         return None
     last = lines[-1].rstrip(".! ").replace(",", "")
-    number = r"([+-]?(?:\\d+)(?:\\.\\d+)?)"
+    number = r"([+-]?[0-9]+(?:[.][0-9]+)?)"
     patterns = (
-        rf"\\A{number}\\Z",
-        rf"\\A(?:the\\s+)?(?:final\\s+)?(?:answer|result)\\s*(?::|is|=)\\s*{number}\\Z",
-        rf"\\A.+\\s(?:=|equals)\\s*{number}\\Z",
+        rf"{number}",
+        rf"(?:the[ ]+)?(?:final[ ]+)?(?:answer|result)[ ]*(?::|is|=)[ ]*{number}",
+        rf".+[ ](?:=|equals)[ ]*{number}",
     )
     for pattern in patterns:
         found = re.fullmatch(pattern, last, flags=re.I)
