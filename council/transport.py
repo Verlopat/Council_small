@@ -125,6 +125,7 @@ class FamilyTransport:
                 self.record("model_call_succeeded", role=role, family=family,
                             provider=entry.provider, model=entry.model,
                             seconds=elapsed, response=text,
+                            prompt_hash=hashlib.sha256(message.encode()).hexdigest(),
                             status=raw.get('status') if raw else None,
                             headers=raw.get('headers') if raw else {},
                             raw_body=raw.get('body') if raw else None)
