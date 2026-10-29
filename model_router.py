@@ -9,6 +9,7 @@ No API keys or raw server error responses are written to disk.
 from __future__ import annotations
 
 import argparse
+import contextvars
 from decimal import Decimal, InvalidOperation
 import json
 import os
@@ -23,6 +24,8 @@ import requests
 from dotenv import load_dotenv
 from answer_validation import matches_expected
 from router_errors import CandidateError, from_http
+
+RAW_CAPTURE = contextvars.ContextVar('raw_provider_response_capture', default=None)
 
 ROOT = Path(__file__).resolve().parent
 load_dotenv(ROOT / '.env', override=True)
@@ -79,6 +82,17 @@ def api_call(method: str, url: str, *, key: str | None = None,
                              kind='invalid_response')
     if parsed.get('success') is False or parsed.get('error'):
         raise CandidateError('Provider reported an error', kind='invalid_response')
+    if method == 'POST':
+        observer = RAW_CAPTURE.get()
+        if observer is not None:
+            # Only non-secret rate/usage headers are retained, never auth tokens.
+            allow = {'retry-after', 'x-ratelimit-remaining-requests',
+                     'x-ratelimit-limit-requests', 'x-ratelimit-reset-requests',
+                     'x-ratelimit-remaining-tokens', 'x-ratelimit-limit-tokens'}
+            safe = {str(k).lower(): v for k, v in resp.headers.items()
+                    if str(k).lower() in allow}
+            observer.append({'status': resp.status_code, 'headers': safe,
+                             'body': parsed})
     return parsed
 
 
@@ -209,7 +223,8 @@ class Router:
 
     def generate(self, candidate: Candidate, prompt: str, *, probe: bool = False,
                  request_timeout: float | None = None,
-                 max_output_tokens: int | None = None) -> str:
+                 max_output_tokens: int | None = None,
+                 system_text: str | None = None) -> str:
         """A probe is an actual short inference, not just a model lookup."""
         provider, model = candidate.provider, candidate.model
         key = os.getenv(KEY_NAMES[provider], '').strip()
@@ -223,6 +238,9 @@ class Router:
         token_limit = 192 if probe else (max_output_tokens or 750)
         if probe:
             prompt = 'Hi. Reply with OK.'
+            system_text = None
+        messages = ([{'role': 'system', 'content': system_text}]
+                    if system_text else []) + [{'role': 'user', 'content': prompt}]
         if provider == 'Gemini':
             headers = {'x-goog-api-key': key}
             # Validate the candidate model is visible to this key first.
@@ -233,9 +251,12 @@ class Router:
             generation = {'maxOutputTokens': 192 if probe else (max_output_tokens or 700)}
             if model == 'gemini-3.8-flash':
                 generation['thinkingConfig'] = {'thinkingLevel': 'LOW'}
+            payload = {'contents': [{'parts': [{'text': prompt}]}],
+                       'generationConfig': generation}
+            if system_text:
+                payload['systemInstruction'] = {'parts': [{'text': system_text}]}
             result = api_call('POST', base + ':generateContent', headers=headers,
-                              payload={'contents': [{'parts': [{'text': prompt}]}],
-                                       'generationConfig': generation}, timeout=timeout)
+                              payload=payload, timeout=timeout)
             choices = result.get('candidates') or []
             if not choices or not isinstance(choices[0], dict):
                 raise CandidateError('No Gemini candidates')
@@ -252,7 +273,7 @@ class Router:
                               key=key,
                               payload={
                                   'model': model,
-                                  'messages': [{'role': 'user', 'content': prompt}],
+                                  'messages': messages,
                                   'max_tokens': token_limit,
                                   'stream': False,
                               },
@@ -279,7 +300,7 @@ class Router:
             if not model.startswith('@cf/'):
                 raise CandidateError('Cloudflare model must use a @cf/ ID')
             result = api_call('POST', f'https://api.cloudflare.com/client/v4/accounts/{account}/ai/run/{model}',
-                              key=key, payload={'messages': [{'role': 'user', 'content': prompt}]},
+                              key=key, payload={'messages': messages},
                               timeout=timeout)
             data = result.get('result') or {}
             if isinstance(data, dict):
@@ -290,7 +311,7 @@ class Router:
                 raw = data if isinstance(data, str) else ''
         elif provider == 'Ollama Cloud':
             result = api_call('POST', 'https://ollama.com/api/chat', key=key,
-                              payload={'model': model, 'messages': [{'role': 'user', 'content': prompt}],
+                              payload={'model': model, 'messages': messages,
                                        'stream': False}, timeout=timeout)
             if result.get('done_reason') in ('length', 'unload'):
                 raise CandidateError('Ollama generation incomplete')
@@ -306,7 +327,7 @@ class Router:
             if provider == 'LLM7.io':
                 self._pace_llm7()
             result = api_call('POST', endpoint, key=key,
-                              payload={'model': model, 'messages': [{'role': 'user', 'content': prompt}],
+                              payload={'model': model, 'messages': messages,
                                        'max_tokens': token_limit, 'stream': False}, timeout=timeout)
             raw, _ = extract_openai(result)
         if not isinstance(raw, str):

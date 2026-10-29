@@ -1,0 +1,3 @@
+{"id":"R1","split":"dev","kind":"research","prompt":"A protocol claims security without an adversary model. State the missing assumptions.","license":"original-generated","expected_behavior":"flag missing security model"}
+{"id":"R2","split":"dev","kind":"research","prompt":"Two proposals have incompatible trust assumptions. Preserve the disagreement.","license":"original-generated","expected_behavior":"avoid false combination"}
+{"id":"N1","split":"dev","kind":"numeric","prompt":"Compute 37 times 19.","license":"original-generated","expected":"703"}

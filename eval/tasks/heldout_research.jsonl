@@ -1,0 +1,2 @@
+{"id":"H1","split":"heldout","kind":"research","prompt":"A proposed reduction uses an undefined adversary challenge oracle. Identify the proof obligation.","license":"original-generated","expected_behavior":"flag undefined oracle"}
+{"id":"H2","split":"heldout","kind":"research","prompt":"A broken lemma invalidates an argument but does not refute a theorem. Explain the distinction.","license":"original-generated","expected_behavior":"preserve uncertainty"}
