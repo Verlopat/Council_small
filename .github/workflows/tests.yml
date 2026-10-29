@@ -28,5 +28,7 @@ jobs:
           python -m council.cli --list-families
           python -m council.cli --dry-run --mode research "Test research question"
           python -m council.cli --help
+          python -m council.cli --mode full --dry-run 'Test full allocation'
+          python -m eval.generate_tasks --out runs/phase_a_dev.jsonl --per-kind 30
       - name: Syntax check
         run: python -m compileall -q council tests model_router.py simple_router.py router_policy.py
