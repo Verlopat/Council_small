@@ -292,8 +292,22 @@ class FullCouncilRunner(CouncilRunner):
                     changed=require_string(item,"statement")
                     if changed!=self.ledger.claims[cid].statement:
                         revised=self.ledger.revise(cid,changed)
-                        revised.source_span=None  # old anchor is no longer proof of the edit
-                        self.events.record("claim_revised",claim_id=cid,version=revised.version)
+                        revised.source_span=None  # never inherit the old anchor
+                        source_span=item.get("source_span")
+                        updated_text=p.get("revised_approach","")
+                        if isinstance(source_span,str) and isinstance(updated_text,str):
+                            try:
+                                anchor=validate_anchor(updated_text,changed,source_span,
+                                    assumptions=string_list(item,"assumptions"))
+                                revised.source_span=anchor.source_span
+                                revised.assumptions=list(anchor.assumptions)
+                                revised.quantifiers=list(anchor.quantifiers)
+                            except (ValueError,OutputError):
+                                self.warnings.append(cid+": revised claim anchor/quantifier mismatch")
+                        if revised.source_span is None:
+                            self.extra_obligations.append(cid+": revised statement needs a new exact source anchor")
+                        self.events.record("claim_revised",claim_id=cid,version=revised.version,
+                                           source_anchor_verified=bool(revised.source_span))
                 for item in item_list(author,"responses"):
                     oid=require_string(item,"objection_id")
                     if oid not in {o.id for o in related}:continue
@@ -303,6 +317,39 @@ class FullCouncilRunner(CouncilRunner):
                     self.events.record("author_response_received",response=asdict(response))
             except (OutputError,ValueError):
                 self.warnings.append("Invalid author revision by "+p["family"])
+        # The original critic re-reads the author's revised text without
+        # being allowed to close its own objection by consensus.
+        for p in proposals:
+            if "revised_approach" not in p or self.budget.debate_remaining()<3:
+                continue
+            reviewer=next((f for f in self.solvers if f!=p["family"]),None)
+            if not reviewer:
+                continue
+            followup=await self._call(reviewer,"review",{
+                "question":question,"proposal":{"id":p["id"],
+                    "approach":p["revised_approach"]},
+                "claims":[{"id":cid,"statement":self.ledger.claims[cid].statement,
+                           "source_span":self.ledger.claims[cid].source_span}
+                          for cid in p["claim_ids"]],
+                "review_phase":"independent_revision_recheck"})
+            if followup:
+                try:
+                    for raw_ob in item_list(followup,"objections"):
+                        claimed=require_string(raw_ob,"claim_id")
+                        cid=p["claim_map"].get(claimed,claimed)
+                        if cid not in p["claim_ids"]:continue
+                        objection=Objection("o"+str(len(self.objections)+1),
+                            p["id"],cid,reviewer,
+                            require_string(raw_ob,"issue"),
+                            require_string(raw_ob,"consequence"),
+                            require_string(raw_ob,"suggested_check"))
+                        self.objections.append(objection)
+                        self.events.record("revision_review_objection",
+                            objection=asdict(objection))
+                except (ValueError,OutputError):
+                    self.warnings.append("Revision review invalid for "+p["id"])
+            else:
+                self.warnings.append("Independent revision recheck unavailable for "+p["id"])
         for claim in list(self.ledger.claims.values())[:self.max_claims]:
             if self.budget.debate_remaining()<1:break
             await self._translate_and_check(claim)
