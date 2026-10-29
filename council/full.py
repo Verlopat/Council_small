@@ -35,10 +35,15 @@ AUDITOR="gemma"
 
 class FullCouncilRunner(CouncilRunner):
     def __init__(self,transport,events,budget,*,requirements:Requirements|None=None,
-                 solvers=FULL_SOLVERS,max_claims=12,hunter_cap=4):
+                 solvers=FULL_SOLVERS,max_claims=12,hunter_cap=4,
+                 translator_family=TRANSLATOR,judge_family=JUDGE,
+                 auditor_family=AUDITOR):
         super().__init__(transport,events,budget,solvers=tuple(solvers))
-        self.assignment=Assignment(tuple(solvers),translator=TRANSLATOR,
-                                   judge=JUDGE,auditor=AUDITOR)
+        self.assignment=Assignment(tuple(solvers),translator=translator_family,
+                                   judge=judge_family,auditor=auditor_family)
+        self.translator_family=translator_family
+        self.judge_family=judge_family
+        self.auditor_family=auditor_family
         self.requirements=requirements
         self.moderator=Moderator(self.ledger,events=events.record)
         self.max_claims=max_claims
@@ -73,7 +78,7 @@ class FullCouncilRunner(CouncilRunner):
             self.extra_obligations.append("Add an exact source span for "+claim.id)
             return
         if self.budget.debate_remaining()<=1:return
-        proposal=await self._call(TRANSLATOR,"translate",{
+        proposal=await self._call(self.translator_family,"translate",{
             "claim_id":claim.id,"claim_version":claim.version,
             "statement":claim.statement,"source_span":claim.source_span,
             "assumptions":claim.assumptions,
@@ -167,7 +172,7 @@ class FullCouncilRunner(CouncilRunner):
                                reviewer_family=other_family,source_span=span)
 
     async def _hunt(self,claim:Claim,hunter_family:str,round_number:int):
-        if hunter_family==claim.owner_family or hunter_family==JUDGE:return
+        if hunter_family==claim.owner_family or hunter_family==self.judge_family:return
         result=await self._call(hunter_family,"hunter",{
             "claim":claim.statement,"assumptions":claim.assumptions,
             "scope":claim.scope,"claim_id":claim.id})
@@ -291,7 +296,7 @@ class FullCouncilRunner(CouncilRunner):
             self.events.record("adaptive_seed_eligible",count=len(self.verified),
                                action="deferred_until_calibrated")
         # Questions without specific requirements remain explicitly unassessed coverage.
-        coverage=await self._call(TRANSLATOR,"coverage",{
+        coverage=await self._call(self.translator_family,"coverage",{
             "requirements":req.as_data(),
             "claims":[{"id":c.id,"statement":c.statement,
                        "source_span":c.source_span} for c in self.ledger.claims.values()]})
@@ -350,7 +355,7 @@ class FullCouncilRunner(CouncilRunner):
         except ValueError:
             ledger_view="Ledger exceeds model context; deterministic partial required"
             self.warnings.append("Ledger too long for blind judge")
-        candidate=await self._call(JUDGE,"judge",{
+        candidate=await self._call(self.judge_family,"judge",{
             "ledger":ledger_view,
             "question_requirements":req.as_data(),
             "argument_map":[{"claim_id":x["claim_id"],"evidence_id":x["evidence_id"]}
@@ -365,7 +370,7 @@ class FullCouncilRunner(CouncilRunner):
             brief.limitations.append("Composition contains unverified claims")
         brief.unresolved_objections=list(dict.fromkeys(brief.unresolved_objections+
                             list(verdict["blocking"])))
-        audit=await self._call(AUDITOR,"audit",{"question":question,
+        audit=await self._call(self.auditor_family,"audit",{"question":question,
             "requirements":req.as_data(),"blind_verdict":verdict,
             "research_result":brief.to_dict()},synthesis=True)
         if audit:
