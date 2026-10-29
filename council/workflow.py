@@ -12,6 +12,7 @@ from council.models import (Claim, ClaimLedger, Objection, AuthorResponse,
 from council.parse import (OutputError, parse_object, require_string,
                            string_list, item_list)
 from council.prompts import prompt
+from council.schemas import validate as validate_output
 from council.transport import FamilyUnavailable
 
 DEFAULT_SOLVERS = ("gpt-oss", "command", "nemotron")
@@ -48,9 +49,9 @@ class CouncilRunner:
                                    "provider": response.provider, "model": response.model,
                                    "prompt_hash": response.prompt_hash})
         try:
-            return parse_object(response.text)
-        except OutputError:
-            self.warnings.append(role + "/" + family + ": malformed JSON")
+            return validate_output(role, parse_object(response.text))
+        except (OutputError, ValueError) as error:
+            self.warnings.append(role + "/" + family + ": invalid structured output")
             self.events.record("role_parse_error", role=role, family=family,
                                provider=response.provider, model=response.model)
             return None
