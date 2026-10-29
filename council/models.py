@@ -31,6 +31,9 @@ class Evidence:
     artifact_hash: str
     assumptions: tuple[str, ...] = ()
     independently_checked: bool = False
+    source_id: str | None = None
+    provenance: tuple[str, ...] = ()
+    checker_kind: str | None = None
 
 
 @dataclass
@@ -44,6 +47,11 @@ class Claim:
     evidence_ids: list[str] = field(default_factory=list)
     limitations: list[str] = field(default_factory=list)
     needs_re_evaluation: bool = False
+    source_span: str | None = None
+    assumptions: list[str] = field(default_factory=list)
+    quantifiers: list[str] = field(default_factory=list)
+    scope: str | None = None
+    artifact_hash: str | None = None
 
     def revise(self, statement: str) -> "Claim":
         """Revision invalidates the applicability of prior evidence."""
@@ -52,7 +60,11 @@ class Claim:
         return Claim(self.id, self.version + 1, statement, self.owner_family,
                      dependencies=list(self.dependencies),
                      limitations=list(self.limitations),
-                     needs_re_evaluation=True)
+                     needs_re_evaluation=True,
+                     source_span=self.source_span,
+                     assumptions=list(self.assumptions),
+                     quantifiers=list(self.quantifiers), scope=self.scope,
+                     artifact_hash=None)
 
 
 @dataclass(frozen=True)
@@ -119,9 +131,11 @@ class ClaimLedger:
         self.evidence[evidence.id] = evidence
         claim.evidence_ids.append(evidence.id)
         # Passing tests are scoped support, not global proof.
-        if evidence.independently_checked and evidence.outcome == "pass":
+        if (evidence.independently_checked and evidence.outcome == "pass"
+                and evidence.kind in (EvidenceKind.TEST, EvidenceKind.FORMAL_PROOF)):
             claim.status = ClaimStatus.SUPPORTED
-        elif evidence.independently_checked and evidence.outcome == "fail":
+        elif (evidence.independently_checked and evidence.outcome == "fail"
+                and evidence.kind in (EvidenceKind.TEST, EvidenceKind.COUNTEREXAMPLE)):
             claim.status = ClaimStatus.CONTRADICTED
             self.invalidate_dependents(claim.id)
 
