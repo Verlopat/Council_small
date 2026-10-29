@@ -2,7 +2,7 @@
 import tempfile
 import unittest
 from pathlib import Path
-from eval.baselines import majority,best_of_n
+from eval.baselines import majority,best_of_n,family_vote
 from eval.metrics import bootstrap_ci,paired_deltas,earns_its_place
 from eval.ratings import Ratings
 from eval.parameter_sweep import choose
@@ -15,6 +15,13 @@ class EvaluationTests(unittest.TestCase):
         self.assertEqual(majority(outputs).answer,"wrong")
         self.assertEqual(best_of_n(outputs,lambda x:(x=="correct",1.0)).answer,
                          "correct")
+    def test_six_family_vote_requires_distinct_lineages(self):
+        same_family={"glm":"156","gpt-oss":"156"}
+        self.assertIsNone(family_vote(same_family).answer)
+        six={str(i): ("156" if i<4 else "155") for i in range(6)}
+        self.assertEqual(family_vote(six).answer,"156")
+        self.assertEqual(family_vote(six).calls,6)
+
     def test_ci_task_pairing(self):
         records=[
             {"task_id":"t1","system":"council","correct":1},
