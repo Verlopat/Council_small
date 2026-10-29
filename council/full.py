@@ -209,7 +209,8 @@ class FullCouncilRunner(CouncilRunner):
         if not isinstance(question,str) or not question.strip():
             raise ValueError("Question required")
         req=self.requirements or Requirements(question)
-        self.events.record("run_started",question=question,mode="full",
+        self.events.record("run_started",question=question,mode=mode,
+            pipeline="evidence",
             requirements=req.as_data(),role_assignment=asdict(self.assignment),
             deadline_remaining=self.budget.remaining())
         proposals=[]
@@ -426,9 +427,11 @@ class FullCouncilRunner(CouncilRunner):
             verdict["cause"]="composition_failure"
         brief.unresolved_objections=list(dict.fromkeys(brief.unresolved_objections+
                             list(verdict["blocking"])))
-        audit=await self._call(self.auditor_family,"audit",{"question":question,
-            "requirements":req.as_data(),"blind_verdict":verdict,
-            "research_result":brief.to_dict()},synthesis=True)
+        audit=None
+        if mode!="quick":
+            audit=await self._call(self.auditor_family,"audit",{"question":question,
+                "requirements":req.as_data(),"blind_verdict":verdict,
+                "research_result":brief.to_dict()},synthesis=True)
         if audit:
             try:
                 brief.unresolved_objections=list(dict.fromkeys(
@@ -436,7 +439,7 @@ class FullCouncilRunner(CouncilRunner):
                 brief.proposed_experiments=list(dict.fromkeys(
                      brief.proposed_experiments+string_list(audit,"suggested_checks")))
             except OutputError:self.warnings.append("Audit output malformed")
-        else: brief.limitations.append("Independent auditor unavailable")
+        elif mode!="quick": brief.limitations.append("Independent auditor unavailable")
         brief.completion_status=("partial" if proposals else "unresolved")
         brief.limitations=list(dict.fromkeys(brief.limitations+self.warnings))
         result={"research_result":brief.to_dict(),"proposals":proposals,
@@ -449,3 +452,18 @@ class FullCouncilRunner(CouncilRunner):
             "warnings":self.warnings}
         self.events.record("run_finished",result=result)
         return result
+
+class QuickCouncilRunner(FullCouncilRunner):
+    """One independent solver, scoped checks, blind judge and composition.
+
+    No debate, repair, coverage or audit calls. A research sketch may still
+    return unresolved; confidence must come from evidence rather than votes.
+    """
+    def __init__(self,transport,events,budget,*,requirements=None):
+        super().__init__(transport,events,budget,requirements=requirements,
+                         solvers=("gpt-oss",),max_claims=4,hunter_cap=0,
+                         enable_coverage=False,enable_relevance=False,
+                         critics=(),adaptive_seeds=False,enable_repairs=False)
+
+    async def run(self,question:str,*,mode:str="quick"):
+        return await super().run(question,mode="quick")
