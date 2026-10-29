@@ -47,8 +47,8 @@ class ScopedChecks(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_anchor(span,"A simulator exists",span)
     def test_final_number_handles_unicode_spaces_and_false_positives(self):
-        self.assertEqual(final_number("Calculation:\\n12\u202f×\u202f13\u202f=\u202f156"),"156")
-        self.assertEqual(final_number("Intermediate: 130\\nAnswer: **156**"),"156")
+        self.assertEqual(final_number("Calculation:\n12\u202f×\u202f13\u202f=\u202f156"),"156")
+        self.assertEqual(final_number("Intermediate: 130\nAnswer: **156**"),"156")
         self.assertEqual(final_number("The document mentions 156, but not as the final answer."),None)
         self.assertEqual(final_number("Answer: 155"),"155")
 
