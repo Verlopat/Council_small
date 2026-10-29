@@ -95,7 +95,7 @@ class FamilyTransport:
                 timeout = min(allowed, budget.allowed(self.timeout, synthesis=synthesis))
                 if timeout <= 1:
                     raise TimeoutError()
-                sep = '\\nDATA_JSON:\\n'
+                sep = chr(10) + 'DATA_JSON:' + chr(10)
                 system_text, user_text = (message.split(sep, 1)
                     if message.startswith('SYSTEM ROLE:') and sep in message
                     else (None, message))
