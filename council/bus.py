@@ -22,7 +22,7 @@ class MessageBus:
                  repair_cap: int = 1, pair_cap: int = 3):
         self.threads: dict[str, Thread] = {}
         self.message_cap, self.verifier_cap = message_cap, verifier_cap
-        self.repair_cap, self.pair_cap = repair_cap
+        self.repair_cap, self.pair_cap = repair_cap, pair_cap
         self.handles: dict[str, str] = {}
     def handle(self, model_identity: str) -> str:
         # Opaque, stable within a run; not a source-identifying model label.
