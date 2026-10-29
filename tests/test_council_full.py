@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
-from council.full import FullCouncilRunner
+from council.full import FullCouncilRunner, QuickCouncilRunner
 from council.budget import RunBudget
 from council.events import EventStore
 from council.transport import CallResult
@@ -52,6 +52,17 @@ class FullModeTests(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(result["research_result"]["supported_findings"])
                 self.assertEqual(result["verdict"]["status"],"answer")
                 self.assertEqual(events.replay()[-1]["event"],"run_finished")
+    async def test_quick_checks_before_judging(self):
+        with tempfile.TemporaryDirectory() as d:
+            with EventStore(Path(d),"quick") as events:
+                t=FakeFullTransport()
+                result=await QuickCouncilRunner(
+                    t,events,RunBudget.start(80,10)).run("Check equality")
+                self.assertEqual([x[1] for x in t.calls],
+                                 ["proposal","translate","judge"])
+                self.assertTrue(result["research_result"]["supported_findings"])
+                self.assertEqual(result["verdict"]["status"],"answer")
+
     async def test_no_anchor_means_no_certification(self):
         with tempfile.TemporaryDirectory() as d:
             with EventStore(Path(d),"f") as events:
