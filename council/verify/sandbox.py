@@ -46,14 +46,24 @@ def run_python(code: str, *, timeout: float = 10.0) -> SandboxResult:
                "--clearenv", "--setenv", "PATH", "/usr/bin:/bin",
                "--setenv", "PYTHONDONTWRITEBYTECODE", "1",
                "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp"]
-        for mount in ("/usr", "/lib", "/lib64"):
-            if Path(mount).exists():
+        # A merged-usr distribution uses /lib -> /usr/lib; reproduce the
+        # symlink rather than binding through a symlink destination.
+        cmd += ["--ro-bind", "/usr", "/usr"]
+        for mount in ("/lib", "/lib64"):
+            if Path(mount).is_symlink():
+                target=os.readlink(mount)
+                if target in ("usr/lib", "/usr/lib"):
+                    cmd += ["--symlink", "usr/lib", mount]
+                else:
+                    return SandboxResult("error", "unexpected_system_library_symlink")
+            elif Path(mount).exists():
                 cmd += ["--ro-bind", mount, mount]
         # Read-only interpreter/venv only, not the caller's working directory.
         prefix = str(Path(sys.prefix).resolve())
         if not (prefix == "/usr" or prefix.startswith("/usr/")):
             cmd += ["--ro-bind", prefix, prefix]
-        cmd += ["--ro-bind", work, "/work", "--chdir", "/work",
+        # Only this throwaway scratch directory is writable in the sandbox.
+        cmd += ["--bind", work, "/work", "--chdir", "/work",
                 "--", sys.executable, "-I", "-B", "/work/check.py"]
         try:
             proc = subprocess.run(cmd, stdout=subprocess.PIPE,
