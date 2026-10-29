@@ -2,6 +2,8 @@
 from __future__ import annotations
 from dataclasses import dataclass, field, asdict
 from enum import Enum
+from collections import deque
+from council.dependencies import Dependency, DependencyGraph
 
 
 class ClaimStatus(str, Enum):
@@ -114,6 +116,7 @@ class ClaimLedger:
     def __init__(self):
         self.claims: dict[str, Claim] = {}
         self.evidence: dict[str, Evidence] = {}
+        self.argument_dependencies = DependencyGraph()
 
     def add_claim(self, claim: Claim) -> None:
         if claim.id in self.claims:
@@ -121,6 +124,23 @@ class ClaimLedger:
         if claim.version < 1 or not claim.statement.strip():
             raise ValueError("Invalid claim")
         self.claims[claim.id] = claim
+
+    def register_dependency(self, edge: Dependency) -> None:
+        self.argument_dependencies.add(edge, claims=self.claims)
+        claim=self.claims[edge.dependent_id]
+        if edge.premise_id not in claim.dependencies:
+            claim.dependencies.append(edge.premise_id)
+
+    def distinct_evidence_sources(self, claim_id: str) -> set[str]:
+        """Two models citing one document remain ONE underlying source."""
+        claim=self.claims[claim_id]
+        sources=set()
+        for identifier in claim.evidence_ids:
+            item=self.evidence.get(identifier)
+            if item is None or item.claim_version!=claim.version:
+                continue
+            sources.add(item.source_id or item.artifact_hash)
+        return sources
 
     def attach(self, evidence: Evidence) -> None:
         claim = self.claims[evidence.claim_id]
@@ -146,8 +166,22 @@ class ClaimLedger:
         return claim
 
     def invalidate_dependents(self, premise_id: str) -> None:
-        for claim in self.claims.values():
-            if premise_id in claim.dependencies and claim.id != premise_id:
-                claim.needs_re_evaluation = True
-                if claim.status == ClaimStatus.SUPPORTED:
-                    claim.status = ClaimStatus.UNRESOLVED
+        """Invalidate transitive arguments without declaring conclusions false."""
+        affected=self.argument_dependencies.invalidate(premise_id)
+        queue=deque([premise_id])
+        seen={premise_id}
+        # Also cover legacy plain-ID dependency edges for old persisted runs.
+        while queue:
+            parent=queue.popleft()
+            for claim in self.claims.values():
+                if parent in claim.dependencies and claim.id not in seen:
+                    affected.add(claim.id)
+                    seen.add(claim.id)
+                    queue.append(claim.id)
+        for cid in affected:
+            dependent=self.claims.get(cid)
+            if dependent is None:
+                continue
+            dependent.needs_re_evaluation=True
+            if dependent.status == ClaimStatus.SUPPORTED:
+                dependent.status = ClaimStatus.UNRESOLVED
