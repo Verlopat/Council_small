@@ -50,11 +50,26 @@ def normalize(s: str) -> str:
 
 def final_number(s: str) -> str | None:
     """Extract only when the final line is clearly a number/answer; avoid 156 in unrelated prose."""
-    lines = [x.strip().replace("**", "") for x in normalize(s).splitlines() if x.strip()]
+    if not isinstance(s, str):
+        return None
+    # Normalize each line separately; normalizing first collapses newlines and
+    # can accidentally confuse incidental numeric citations with the answer.
+    lines = [normalize(line).replace("**", "").replace("`", "").strip()
+             for line in s.splitlines() if line.strip()]
     if not lines:
         return None
-    match = re.fullmatch(r"(?:answer|result)\s*[:=]\s*([+-]?\d+(?:\.\d+)?)\.?|([+-]?\d+(?:\.\d+)?)", lines[-1], re.I)
-    return match.group(1) or match.group(2) if match else None
+    last = lines[-1].rstrip(".! ").replace(",", "")
+    number = r"([+-]?(?:\\d+)(?:\\.\\d+)?)"
+    patterns = (
+        rf"\\A{number}\\Z",
+        rf"\\A(?:the\\s+)?(?:final\\s+)?(?:answer|result)\\s*(?::|is|=)\\s*{number}\\Z",
+        rf"\\A.+\\s(?:=|equals)\\s*{number}\\Z",
+    )
+    for pattern in patterns:
+        found = re.fullmatch(pattern, last, flags=re.I)
+        if found:
+            return found.group(found.lastindex)
+    return None
 
 @dataclass(frozen=True)
 class AnchoredClaim:
