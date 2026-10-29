@@ -73,7 +73,15 @@ def main(argv=None) -> int:
                     FamilyTransport(timeout=args.timeout, record=destination.record))
             budget = RunBudget.start(args.deadline,
                  reserve=min(20.0, args.deadline / 3))
-            if mode == "full":
+            if mode == "quick" and metadata.get("pipeline") == "evidence":
+                from council.full import QuickCouncilRunner
+                from council.requirements import Requirements
+                reqdata=metadata.get("requirements",{})
+                req=Requirements(reqdata.get("objective",question),
+                    tuple(reqdata.get("constraints",[])),
+                    tuple(reqdata.get("questions",[])))
+                runner=QuickCouncilRunner(transport,destination,budget,requirements=req)
+            elif mode == "full":
                 from council.full import FullCouncilRunner
                 from council.requirements import Requirements
                 reqdata=metadata.get("requirements",{})
@@ -143,6 +151,12 @@ def main(argv=None) -> int:
                 critics=(tuple(cfg.optional.get("critics",[])) if cfg else ()),
                 adaptive_seeds=(cfg.optional.get("adaptive_seeds",False) if cfg else False),
                 enable_repairs=(cfg.optional.get("repair_round",True) if cfg else True))
+        elif args.mode == "quick":
+            from council.full import QuickCouncilRunner
+            from council.requirements import Requirements
+            req=(Requirements.from_file(args.requirements_file)
+                 if args.requirements_file else Requirements(question))
+            runner=QuickCouncilRunner(transport,events,budget,requirements=req)
         else:
             runner = CouncilRunner(transport, events, budget)
         result = asyncio.run(runner.run(question, mode=args.mode))
