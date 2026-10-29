@@ -1,32 +1,30 @@
-# Multi-Model Council (Council_small)
+# Council_small — evidence-aware multi-model research council
 
-An evidence-aware, research-oriented multi-LLM council running over **allowlisted free-tier API models**. Based on `Council_Architecture_v4` and, importantly, the **Additional corrections** at the end of that document.
+Implementation of the **Multi-Model Council Architecture v4**, interpreted together with its **Additional Corrections** (pages 33–40). The corrections take precedence where the two disagree: no hunter failure or LLM agreement is treated as a proof, and failed reductions do not automatically disprove the underlying theorem.
 
-The API connector, model catalog checks, fallback policy, health cache, and their offline tests were imported from the owner's [Verlopat/test](https://github.com/Verlopat/test). That repository is unchanged.
+The original provider routing foundation comes from the owner's [Verlopat/test](https://github.com/Verlopat/test); that reference repository was not modified.
 
-## Implemented initial milestone
+## Current state
 
-- 8 configured API providers from the reference router (no NVIDIA in Council roles)
-- Model **family** assignment (not endpoint voting), same-family failover, reserved Gemini synthesis role
-- Sealed first proposals: **gpt-oss / Command / Nemotron** cannot see one another before proposing
-- Structured cross-family objections; author revisions and versioned claim records
-- Independent **GLM final audit**, separate from all proposer and synthesis families
-- Conservative research brief: hypotheses, proof obligations, objections, experiments and next steps
-- A model's claims are **not** promoted to verified because models agree or fail to refute them
-- SQLite + JSONL local event history, replay of recorded final report, prompt hashes and actual model identities
-- Deadline with synthesis reserve, deterministic partial output on missing or failing roles
-- Safe, narrowly scoped arithmetic checker (never runs generated Python on the host)
-- Offline integration tests in GitHub Actions
+The repository contains a runnable CLI, the original provider adapters, quick/research/full execution modes, typed evidence and claim models, validated role responses, a family-constrained model scheduler, an append-only run log, and offline tests. **Do not equate implemented interfaces with independent live validation.** In particular: formal proof assistants must be installed, bwrap must actually work on the host, billing constraints must be checked on each provider dashboard, and no experiment has yet shown this Council superior to equal-budget best-of-N.
 
-### What is **not yet** implemented
+The full pipeline contains sealed independent proposals, a rival claim extractor, peer objections, author revisions, claim-scoped translation and verification, optional counterexample hunters and critics, bounded repair, a blind Gemini-family judge, composition checking and separate auditing. Stage caps and fallback routes are enforced by code. A claim only receives independent arithmetic evidence when its exact asserted equation agrees with the checker input; arbitrary LLM-generated tests and source-quote matches **do not** automatically certify informal claims.
 
-This is a **first end-to-end research milestone**, not the entire v4 architecture. No raw provider response/headers API yet; the inherited router returns text. No retrieval verification, automatic source checking, bubblewrap execution of model-generated code, formal proof translation, asynchronous claim debate bus, adaptive seeds, calibrated role ratings, or evaluated superiority over best-of-N. The arithmetic checker is presently a library utility, not an automatic proof of Council-generated claims. Accordingly, the orchestrator always leaves unsupported findings as **hypotheses**, and labels its final report **partial**.
+### Feature families
 
-The first target is reliable *research idea generation and critique*, not automatic theorem certification.
+| Area | Main modules | Caveat |
+| --- | --- | --- |
+| Provider transport and free-tier selection | `model_router.py`, `router_policy.py`, `council/transport.py` | Live availability and free billing depend on your keys and account |
+| Family reservations, quotas, deadlines | `council/assignment.py`, `families.py`, `quota.py`, `budget.py` | Set real provider limits in `council.yaml`; unconfigured defaults are not provider guarantees |
+| Claims, evidence, reviewer acts | `council/models.py`, `protocol.py`, `evidence.py`, `bus.py`, `moderator.py` | Modalities and proof scope must survive all revisions |
+| Claim-specific checking | `council/verify/`, `extract.py`, `translate.py`, `compose.py` | Generated code is NEVER executed without bubblewrap; optional SymPy, Z3, Lean, Tamarin and ProVerif require installation and interpretation review |
+| Council workflows | `council/full.py`, `workflow.py`, `judge.py`, `prompts.py`, `schemas.py` | Research outcomes are partial unless evidence justifies the assertions |
+| Persistence and replay | `council/events.py`, `replay.py`, `call_cache.py` | Local run logs contain research prompts and provider responses: keep private |
+| Evaluation | `eval/` | Plan and run controlled baselines; no published performance results yet |
 
-## Set up
+## Setup
 
-Python 3.11+ recommended:
+Python 3.11+ and Linux recommended:
 
 ```bash
 git clone https://github.com/Verlopat/Council_small
@@ -36,47 +34,74 @@ source .venv/bin/activate
 python -m pip install -r requirements.txt
 cp .env.example .env
 chmod 600 .env
-# Edit .env locally and add ONLY confirmed free/non-billed API keys.
+# Add API credentials only for verified free/non-billed accounts.
 ```
 
-Never commit `.env` or share credentials. **Cohere requires a confirmed Trial key** and `COHERE_TRIAL_CONFIRMED=1`; Ollama Cloud requires confirmation of a free non-billed plan and `OLLAMA_FREE_CONFIRMED=1`. Keys alone do not prove no payment will occur. OpenRouter candidates are re-checked for `:free` and zero token prices; LLM7 candidates are limited to catalog-marked Turbo allowance. Recheck billing limits yourself before real calls.
+The Council excludes NVIDIA NIM from its family allowlist. OpenRouter candidates are restricted to catalog-confirmed zero-priced `:free` IDs, LLM7 to catalog-marked Turbo eligible IDs. Cohere needs `COHERE_TRIAL_CONFIRMED=1` after confirming a Trial key, and Ollama Cloud needs `OLLAMA_FREE_CONFIRMED=1` after confirming an eligible account. This prevents some accidental paid calls; it **cannot** guarantee what a provider bills.
 
-## Commands
+For isolated model-written check execution, install and verify `bubblewrap`. If unavailable, the checker returns an error. Do not disable this fail-closed behavior.
+
+## Running
 
 ```bash
-# No API calls; plan the allocation.
-python -m council.cli --dry-run --mode research "Explore lattice-based VRFs"
+# No API calls: review roles and budget.
+python -m council.cli --mode full --dry-run "Investigate lattice VRFs"
 python -m council.cli --list-families
 
-# Two roles: one solver then synthesis. Still an unverified research sketch.
-python -m council.cli --mode quick --deadline 90 "Sketch a threshold VRF"
+# Single solver -> scoped checks -> blind judge -> composition.
+python -m council.cli --mode quick --deadline 90 "What security game should a VRF meet?"
 
-# Research first milestone: 3 proposals, cross review, revision, synthesis and audit.
-python -m council.cli --mode research --deadline 300 --json "Design a lattice VRF with ZK verification"
+# Three proposals -> extracts, reviews, scoped checks, repairs and separate audit.
+python -m council.cli --mode full --deadline 600 --json "Design a lattice VRF with ZK proofs"
 
-# Replay the stored result with no API calls (copy the run_id printed by CLI).
-python -m council.cli --run-dir runs --replay RUN_ID
+# Requirements can be supplied as a JSON file with objective, constraints, questions.
+python -m council.cli --mode full --requirements-file requirements.json "Research project"
 
-# Offline tests; uses mock provider responses.
-python -m unittest discover -s tests -v
-python -m unittest -v test_simple_router.py
+# Replay recorded final result or re-run orchestration from recorded model responses.
+python -m council.cli --replay RUN_ID
+python -m council.cli --recompute RUN_ID
+# Resume missing calls (may consume quota if API providers are configured):
+python -m council.cli --resume RUN_ID
 ```
 
-The router's original utilities are still available: `python model_router.py --list`, `python simple_router.py --check-providers ...`. **Live provider health was not re-tested during this implementation.**
+Customize families and optional features in `council.yaml`. Default three solvers keep an independent Gemma audit family. A fourth Gemma solver is possible if an unused independent family (such as functioning MiniMax) is explicitly assigned the auditor role; do not count the same family twice.
 
-## Responsibility and limitations
+## Evaluation and diagnostics
 
-The control code enforces evidence policy; it does not make uncertain natural language claims true. Model suggestions are never evidence of execution. A negative review is not a verified counterexample; a conceded proof gap does not imply a theorem is false. Changing a claim increments its version and forces evidence reconsideration. A disproved premise requires reconsidering dependents rather than declaring conclusions false.
+```bash
+# Build 30 original tasks each in numeric, code, symbolic classes (90 total).
+python -m eval.generate_tasks --out runs/phase_a_dev.jsonl --split dev --per-kind 30
+python -m eval.generate_tasks --out runs/phase_a_holdout.jsonl --split heldout --per-kind 30
 
-Family diversity is useful for reducing duplicated perspectives, but does not prove independent errors. Tagged/serialized prompts reduce accidental role confusion but are not a prompt-injection security boundary. The inherited synchronous requests use bounded async wrappers; cancellation cannot forcibly terminate a thread already inside a network request. Full raw-response, header-aware quota scheduling and a hardened execution sandbox are future implementation tasks.
+# Free, non-executing Phase-A plan:
+python -m eval.phase_a runs/phase_a_dev.jsonl --runs 3 --calls 12
 
-Local run logs **contain research questions and model responses**; keep `runs/` private. Only run trusted code yourself. No model-generated Python is executed by this version.
+# Print evaluation plan; live APIs are disabled unless --confirm-free is passed.
+python -m eval.execute runs/phase_a_dev.jsonl --max-tasks 3
 
-## Next milestones
+# Compare scored Council runs with equal-budget controls:
+python -m eval.run_eval runs/eval/results.jsonl
+# Aggregate independently supplied blinded research annotations:
+python -m eval.score_research ratings.jsonl
 
-1. Raw JSON/header transport, endpoint-specific token budgets and quotas, robust deadline enforcement.
-2. Mechanically checked claim artifacts in an isolated, network-disabled sandbox, mutation and specification tests, source retrieval.
-3. Deterministic debate protocol and separate critique/revision validation, dependency re-evaluation.
-4. Equal-budget evaluation against single-model, self-consistency and tool-selected best-of-N baselines; use held-out research and code tasks.
+# Diagnose provider response fields before treating MiniMax as a seventh usable family.
+python -m council.provider_diagnostics
+# Weekly-style known-answer regression — no API calls without opt-in.
+python -m eval.regression_live
+```
 
-The reference `test` repository remains a transport reference, not the deployment target.
+The optional GitHub Actions regression schedule is **off by default**. It requires the repository variable `COUNCIL_RUN_LIVE_REGRESSION=true` and secret API keys after you check quotas. Hash changes alone do not establish quality drift; scored regressions do.
+
+## Testing
+
+```bash
+python -m unittest discover -s tests -v
+python -m unittest -v test_simple_router.py
+python -m compileall -q council eval
+```
+
+Offline tests mock provider responses and exercise invariants; they do **not** certify live access, sandbox deployment, proof soundness or journal research novelty.
+
+## Architecture-v4 completeness
+
+See [IMPLEMENTATION_MATRIX.md](IMPLEMENTATION_MATRIX.md) for the requirement-by-requirement status, limitations, and validation gates. Source architecture includes proposals for future experimental components and ten open questions; some require your account settings, the actual provider responses and qualified human review. No code can truthfully declare those externally dependent results complete.
