@@ -11,7 +11,7 @@ def bootstrap_ci(deltas,n=10000,alpha=.05,seed=0):
 def paired_deltas(rows,challenger="council",baseline="best_of_n",metric="correct"):
     values=defaultdict(lambda:defaultdict(list))
     for row in rows:
-        if row.get("system") in {challenger,baseline}:
+        if row.get("system") in {challenger,baseline} and row.get("equal_budget",True):
             values[row["task_id"]][row["system"]].append(float(row[metric]))
     return [statistics.fmean(x[challenger])-statistics.fmean(x[baseline])
             for task,x in sorted(values.items()) if x[challenger] and x[baseline]]
