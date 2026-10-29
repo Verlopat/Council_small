@@ -137,7 +137,12 @@ def main(argv=None) -> int:
                 hunter_cap=cfg.hunter_cap if cfg else 4,
                 translator_family=cfg.translator if cfg else "glm",
                 judge_family=cfg.judge if cfg else "gemini",
-                auditor_family=cfg.auditor if cfg else "gemma")
+                auditor_family=cfg.auditor if cfg else "gemma",
+                enable_coverage=(cfg.optional.get("coverage_llm",True) if cfg else True),
+                enable_relevance=(cfg.optional.get("relevance_check",False) if cfg else False),
+                critics=(tuple(cfg.optional.get("critics",[])) if cfg else ()),
+                adaptive_seeds=(cfg.optional.get("adaptive_seeds",False) if cfg else False),
+                enable_repairs=(cfg.optional.get("repair_round",True) if cfg else True))
         else:
             runner = CouncilRunner(transport, events, budget)
         result = asyncio.run(runner.run(question, mode=args.mode))
