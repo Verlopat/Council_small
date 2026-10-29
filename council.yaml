@@ -1,0 +1,27 @@
+# Corrected v4: three independent proposals, with a separate auditor.
+# To use four solvers, reserve a seventh independent auditor family.
+mode: full
+deadline_seconds: 600
+per_call_timeout: 28
+solvers:
+  - {family: gpt-oss, strategy: direct}
+  - {family: command, strategy: code}
+  - {family: nemotron, strategy: decompose}
+translator: glm
+judge: gemini
+auditor: gemma
+max_claims: 12
+hunter_cap: 4
+optional:
+  coverage_llm: true
+  relevance_check: false
+  critics: []
+  repair_round: true
+  adaptive_seeds: false
+caps:
+  messages: 5
+  verifier_calls: 2
+  repairs: 1
+  pair_exchanges: 3
+# Unset rather than inventing free-tier limits. Fill from your own dashboards.
+rate_limits: {}
