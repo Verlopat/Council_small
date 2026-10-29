@@ -3,6 +3,8 @@ from pathlib import Path
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
+from types import SimpleNamespace
 
 from council.quota import QuotaScheduler, QuotaContention
 from council.translate import plan, translation_independent
@@ -57,6 +59,21 @@ class ScopedChecks(unittest.TestCase):
         self.assertIn(result.outcome,("error","pass"))
         if not available():
             self.assertIn("NOT executed",result.detail)
+
+    def test_sandbox_mounts_are_isolated(self):
+        fake=SimpleNamespace(returncode=0,stdout='{"pass":true}'+"\\n",stderr="")
+        with patch("council.verify.sandbox.available",return_value=True), \
+             patch("council.verify.sandbox.subprocess.run",return_value=fake) as execute:
+            output=run_python("print('sandbox')")
+        self.assertEqual(output.outcome,"pass")
+        command=execute.call_args.args[0]
+        self.assertIn("--unshare-all",command)
+        self.assertIn("--clearenv",command)
+        self.assertIn("--bind",command)
+        work_at=command.index("/work")
+        self.assertEqual(command[work_at-2],"--bind")
+        self.assertIn("--ro-bind",command)
+        self.assertNotIn("/home",command)
 
 class QuotaTests(unittest.IsolatedAsyncioTestCase):
     async def test_shared_account_daily_cap(self):
