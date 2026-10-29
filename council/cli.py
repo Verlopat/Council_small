@@ -25,6 +25,10 @@ def main(argv=None) -> int:
                         help="JSON document with objective, constraints and questions")
     parser.add_argument("--run-dir", type=Path, default=Path("runs"))
     parser.add_argument("--run-id", default=None)
+    parser.add_argument("--recompute", metavar="RUN_ID",
+                        help="Replay orchestration from recorded role responses without API calls")
+    parser.add_argument("--resume", metavar="RUN_ID",
+                        help="Resume missing role responses from checkpoint, may use free APIs")
     parser.add_argument("--replay", metavar="RUN_ID",
                         help="Print a prior run's final logged result without API calls")
     parser.add_argument("--dry-run", action="store_true",
@@ -45,6 +49,41 @@ def main(argv=None) -> int:
         if not completed:
             parser.error("Run has no final result")
         print(json.dumps(completed[-1]["payload"]["result"], indent=2, ensure_ascii=False))
+        return 0
+    if args.recompute or args.resume:
+        original_id = args.recompute or args.resume
+        original_db = args.run_dir / (original_id + ".sqlite3")
+        if not original_db.is_file():
+            parser.error("Checkpoint not found")
+        with EventStore(args.run_dir, original_id) as source:
+            recorded = source.replay()
+        metadata = next((e["payload"] for e in recorded
+                         if e["event"] == "run_started"), None)
+        if metadata is None:
+            parser.error("Checkpoint has no start metadata")
+        from council.replay import ReplayTransport, ResumeTransport
+        mode = metadata.get("mode", "research")
+        question = metadata.get("question", "")
+        with EventStore(args.run_dir, original_id +
+                        (".resumed" if args.resume else ".recomputed")) as destination:
+            transport = ReplayTransport(recorded)
+            if args.resume:
+                transport = ResumeTransport(recorded,
+                    FamilyTransport(timeout=args.timeout, record=destination.record))
+            budget = RunBudget.start(args.deadline,
+                 reserve=min(20.0, args.deadline / 3))
+            if mode == "full":
+                from council.full import FullCouncilRunner
+                from council.requirements import Requirements
+                reqdata=metadata.get("requirements",{})
+                req=Requirements(reqdata.get("objective",question),
+                     tuple(reqdata.get("constraints",[])),
+                     tuple(reqdata.get("questions",[])))
+                runner=FullCouncilRunner(transport,destination,budget,requirements=req)
+            else:
+                runner=CouncilRunner(transport,destination,budget)
+            result=asyncio.run(runner.run(question,mode=mode))
+        print(json.dumps(result,ensure_ascii=False,indent=2))
         return 0
     question = " ".join(args.question).strip()
     if not question:
