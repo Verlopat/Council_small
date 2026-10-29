@@ -12,7 +12,7 @@ from council.verify.mutation import numeric_mutants, code_mutants, assess
 from council.verify.ladder import verify
 from council.verify.source import PaperIndex
 from council.verify.sandbox import available, run_python
-from council.extract import validate_anchor, raw_text
+from council.extract import validate_anchor, raw_text, final_number
 from council.judge import enforce_verdict
 from council.models import Claim, ClaimLedger
 
@@ -46,6 +46,12 @@ class ScopedChecks(unittest.TestCase):
         self.assertEqual(validate_anchor(span,span,span).source_span,span)
         with self.assertRaises(ValueError):
             validate_anchor(span,"A simulator exists",span)
+    def test_final_number_handles_unicode_spaces_and_false_positives(self):
+        self.assertEqual(final_number("Calculation:\\n12\u202f×\u202f13\u202f=\u202f156"),"156")
+        self.assertEqual(final_number("Intermediate: 130\\nAnswer: **156**"),"156")
+        self.assertEqual(final_number("The document mentions 156, but not as the final answer."),None)
+        self.assertEqual(final_number("Answer: 155"),"155")
+
     def test_raw_reasoning(self):
         self.assertEqual(raw_text({"choices":[{"message":{"content":"",
                            "reasoning_content":"raw"}}]}),"raw")
