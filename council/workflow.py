@@ -7,6 +7,7 @@ import json
 from dataclasses import asdict
 from council.budget import RunBudget
 from council.families import validate_assignment
+from council.ledger import SQLiteLedger
 from council.models import (Claim, ClaimLedger, Objection, AuthorResponse,
                             ResearchResult)
 from council.parse import (OutputError, parse_object, require_string,
@@ -240,5 +241,7 @@ class CouncilRunner:
             "actual_models": self.actual_models, "warnings": self.warnings,
         }
         # Enum subclasses of str and dataclasses are JSON serializable via asdict.
+        if hasattr(self.events,"db") and hasattr(self.events,"run_id"):
+            SQLiteLedger(self.events.db).save(self.events.run_id,self.ledger)
         self.events.record("run_finished", result=result)
         return result
