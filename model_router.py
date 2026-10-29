@@ -208,7 +208,8 @@ class Router:
                 if (candidate.provider, model) not in used][:limit]
 
     def generate(self, candidate: Candidate, prompt: str, *, probe: bool = False,
-                 request_timeout: float | None = None) -> str:
+                 request_timeout: float | None = None,
+                 max_output_tokens: int | None = None) -> str:
         """A probe is an actual short inference, not just a model lookup."""
         provider, model = candidate.provider, candidate.model
         key = os.getenv(KEY_NAMES[provider], '').strip()
@@ -216,7 +217,10 @@ class Router:
             raise CandidateError('API key not configured')
         timeout = request_timeout if request_timeout is not None else (
             self.probe_timeout if probe else self.timeout)
-        token_limit = 192 if probe else 750
+        if max_output_tokens is not None and (type(max_output_tokens) is not int
+                                              or not 1 <= max_output_tokens <= 8192):
+            raise ValueError('max_output_tokens must be an integer from 1 to 8192')
+        token_limit = 192 if probe else (max_output_tokens or 750)
         if probe:
             prompt = 'Hi. Reply with OK.'
         if provider == 'Gemini':
@@ -226,7 +230,7 @@ class Router:
             if model not in self._gemini_checked:
                 api_call('GET', base, headers=headers, timeout=min(timeout, 12))
                 self._gemini_checked.add(model)
-            generation = {'maxOutputTokens': 192 if probe else 700}
+            generation = {'maxOutputTokens': 192 if probe else (max_output_tokens or 700)}
             if model == 'gemini-3.8-flash':
                 generation['thinkingConfig'] = {'thinkingLevel': 'LOW'}
             result = api_call('POST', base + ':generateContent', headers=headers,

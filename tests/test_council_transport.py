@@ -16,7 +16,8 @@ class DummyRouter:
     def expand(self, candidate, seen):
         return [candidate]
 
-    def generate(self, candidate, message, *, probe=False, request_timeout=None):
+    def generate(self, candidate, message, *, probe=False, request_timeout=None,
+                 max_output_tokens=None):
         self.calls.append((candidate.provider, candidate.model, message))
         if candidate.provider == "Z.ai":
             raise CandidateError("simulated server failure", kind="server")
@@ -48,6 +49,22 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
                     await t.complete("command", "Prompt", RunBudget.start(10, 1),
                                      role="proposal")
                 self.assertEqual(t.router.calls, [])
+
+    async def test_structured_output_token_budget_is_forwarded(self):
+        with tempfile.TemporaryDirectory() as folder:
+            with patch.dict(os.environ, {"GROQ_API_KEY":"mock"}):
+                t = FamilyTransport(health_file=Path(folder) / "health.json")
+                observed = []
+                fake = DummyRouter()
+                real_generate = fake.generate
+                def record_generate(candidate, message, **kwargs):
+                    observed.append(kwargs.get("max_output_tokens"))
+                    return real_generate(candidate, message, **kwargs)
+                fake.generate = record_generate
+                t.router = fake
+                await t.complete("gpt-oss", "Prompt", RunBudget.start(30, 4),
+                                 role="proposal")
+                self.assertEqual(observed, [1800])
 
 if __name__ == "__main__":
     unittest.main()

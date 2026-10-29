@@ -83,7 +83,8 @@ class FamilyTransport:
                             prompt_hash=hashlib.sha256(message.encode()).hexdigest())
                 text = await asyncio.wait_for(
                     asyncio.to_thread(self.router.generate, candidate, message,
-                                      probe=False, request_timeout=max(0.5, timeout - 0.5)),
+                                      probe=False, request_timeout=max(0.5, timeout - 0.5),
+                                      max_output_tokens=1800),
                     timeout=timeout)
                 if not text.strip():
                     raise CandidateError("Empty response", kind="invalid_response")
