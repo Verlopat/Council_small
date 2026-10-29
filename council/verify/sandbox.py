@@ -52,8 +52,8 @@ def run_python(code: str, *, timeout: float = 10.0) -> SandboxResult:
         for mount in ("/lib", "/lib64"):
             if Path(mount).is_symlink():
                 target=os.readlink(mount)
-                if target in ("usr/lib", "/usr/lib"):
-                    cmd += ["--symlink", "usr/lib", mount]
+                if target in ("usr/lib", "/usr/lib", "usr/lib64", "/usr/lib64"):
+                    cmd += ["--symlink", target.lstrip("/"), mount]
                 else:
                     return SandboxResult("error", "unexpected_system_library_symlink")
             elif Path(mount).exists():
