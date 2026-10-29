@@ -37,7 +37,9 @@ class FullCouncilRunner(CouncilRunner):
     def __init__(self,transport,events,budget,*,requirements:Requirements|None=None,
                  solvers=FULL_SOLVERS,max_claims=12,hunter_cap=4,
                  translator_family=TRANSLATOR,judge_family=JUDGE,
-                 auditor_family=AUDITOR):
+                 auditor_family=AUDITOR,enable_coverage=True,
+                 enable_relevance=False,critics=(),adaptive_seeds=False,
+                 enable_repairs=True):
         super().__init__(transport,events,budget,solvers=tuple(solvers))
         self.assignment=Assignment(tuple(solvers),translator=translator_family,
                                    judge=judge_family,auditor=auditor_family)
@@ -50,6 +52,11 @@ class FullCouncilRunner(CouncilRunner):
         self.hunter_cap=hunter_cap
         self.coverage=[]
         self.verified=[]
+        self.enable_coverage=bool(enable_coverage)
+        self.enable_relevance=bool(enable_relevance)
+        self.critics=tuple(critics)
+        self.adaptive_seeds=bool(adaptive_seeds)
+        self.enable_repairs=bool(enable_repairs)
         self.extra_obligations=[]
         self.objections=[]
         self.author_responses=[]
@@ -112,6 +119,14 @@ class FullCouncilRunner(CouncilRunner):
                      self._literal_arithmetic_alignment(claim.statement,artifact))
         if evidence_kind is EvidenceKind.SOURCE:
             independent=False
+            if self.enable_relevance and self.budget.debate_remaining()>3:
+                reviewer=next((f for f in self.solvers if f!=claim.owner_family),None)
+                if reviewer:
+                    opinion=await self._call(reviewer,"relevance",{
+                        "claim_id":claim.id,"statement":claim.statement,
+                        "scope":result.scope,"evidence_kind":result.kind})
+                    self.events.record("relevance_opinion",claim_id=claim.id,
+                        reviewer_family=reviewer,opinion=opinion or {})
         evidence=Evidence(
             id="e"+str(len(self.ledger.evidence)+1),claim_id=claim.id,
             claim_version=claim.version,kind=evidence_kind,
@@ -292,30 +307,59 @@ class FullCouncilRunner(CouncilRunner):
             await self._translate_and_check(claim)
         # Adaptive seeds are permitted only after verification characteristics are known.
         # No extra seed is spent if no claim has a checkable verification result.
-        if self.verified and self.budget.debate_remaining()>10:
+        if self.adaptive_seeds and self.verified and self.budget.debate_remaining()>10:
+            for p in proposals:
+                if self.budget.debate_remaining()<8:break
+                sample=await self._call(p["family"],"proposal",{
+                    "question":question,"requirements":req.as_data(),
+                    "independent":True,"source_spans_required":True})
+                if sample:
+                    p["stability"]=("stable" if sample.get("approach")==p["approach"]
+                                    else "unstable")
+                    for cid in p["claim_ids"]:
+                        self.ledger.claims[cid].needs_re_evaluation = (
+                            p["stability"]=="unstable" and
+                            self.ledger.claims[cid].status is not ClaimStatus.SUPPORTED)
+                    self.events.record("adaptive_sample",proposal_id=p["id"],
+                                       stability=p["stability"])
+        elif self.verified:
             self.events.record("adaptive_seed_eligible",count=len(self.verified),
-                               action="deferred_until_calibrated")
+                               action="disabled_by_configuration")
         # Questions without specific requirements remain explicitly unassessed coverage.
-        coverage=await self._call(self.translator_family,"coverage",{
-            "requirements":req.as_data(),
-            "claims":[{"id":c.id,"statement":c.statement,
-                       "source_span":c.source_span} for c in self.ledger.claims.values()]})
+        coverage=None
+        if self.enable_coverage:
+            coverage=await self._call(self.translator_family,"coverage",{
+                "requirements":req.as_data(),
+                "claims":[{"id":c.id,"statement":c.statement,
+                           "source_span":c.source_span} for c in self.ledger.claims.values()]})
         if coverage:
             try:self.coverage=string_list(coverage,"missing_requirements")
             except OutputError:self.warnings.append("Coverage response malformed")
         if self.budget.debate_remaining()>1 and self.moderator.begin_next_round():
-            open_claims=[c for c in self.ledger.claims.values()
-                         if c.status in {ClaimStatus.PROPOSED,ClaimStatus.UNRESOLVED}]
+            open_claims=[self.ledger.claims[cid]
+                         for cid in self.moderator.priority_order()
+                         if self.ledger.claims[cid].status in
+                         {ClaimStatus.PROPOSED,ClaimStatus.UNRESOLVED}]
             for claim in open_claims[:self.hunter_cap]:
                 if self.budget.debate_remaining()<1:break
                 hunter=next((f for f in self.solvers if f!=claim.owner_family),None)
                 if hunter:
                     await self._hunt(claim,hunter,self.moderator.current_round)
+                for critic in self.critics:
+                    if critic in {claim.owner_family,self.judge_family,
+                                  self.auditor_family} or self.budget.debate_remaining()<1:
+                        continue
+                    opinion=await self._call(critic,"review",{
+                        "claims":[{"id":claim.id,"statement":claim.statement}],
+                        "proposal":{"id":claim.id,"approach":claim.statement}})
+                    if opinion:
+                        self.events.record("optional_critic",claim_id=claim.id,
+                                           family=critic,opinion=opinion)
             # No new verifier evidence => do not start further debate rounds.
         # P4: at most one repair attempt for each remaining challenged claim.
         # The rewritten claim loses its old evidence and requires fresh anchoring.
         for c in list(self.ledger.claims.values())[:self.hunter_cap]:
-            if self.budget.debate_remaining()<=3:break
+            if not self.enable_repairs or self.budget.debate_remaining()<=3:break
             if c.status is not ClaimStatus.UNRESOLVED:continue
             repairer=next((f for f in ("nemotron","command","gpt-oss")
                            if f!=c.owner_family),None)
@@ -355,11 +399,14 @@ class FullCouncilRunner(CouncilRunner):
         except ValueError:
             ledger_view="Ledger exceeds model context; deterministic partial required"
             self.warnings.append("Ledger too long for blind judge")
-        candidate=await self._call(self.judge_family,"judge",{
-            "ledger":ledger_view,
+        judge_payload={"ledger":ledger_view,
             "question_requirements":req.as_data(),
             "argument_map":[{"claim_id":x["claim_id"],"evidence_id":x["evidence_id"]}
-                            for x in self.verified]},synthesis=True)
+                            for x in self.verified]}
+        candidate=await self._call(self.judge_family,"judge",judge_payload,synthesis=True)
+        if candidate is None and self.budget.remaining()>3:
+            candidate=await self._call(self.judge_family,"judge",
+                dict(judge_payload,retry_seed=1),synthesis=True)
         verdict=enforce_verdict(candidate or {"status":"unresolved",
             "partial_answer":brief.proposed_approach,"cause":"judge_error"},
             self.ledger)
@@ -368,6 +415,15 @@ class FullCouncilRunner(CouncilRunner):
         composition=compose_prose([c.id for c in self.ledger.claims.values()],self.ledger)
         if composition.blocking:
             brief.limitations.append("Composition contains unverified claims")
+            assembled=Claim("composition:1",1,
+                "Assembled answer has claims without independently scoped verification",
+                "coordinator",status=ClaimStatus.UNRESOLVED)
+            self.ledger.add_claim(assembled)
+            self.events.record("composition_failed",claim_id=assembled.id,
+                               blocking=list(composition.blocking),rung="prose")
+            verdict=enforce_verdict(dict(verdict,status="unresolved",
+                cause="composition_failure"),self.ledger)
+            verdict["cause"]="composition_failure"
         brief.unresolved_objections=list(dict.fromkeys(brief.unresolved_objections+
                             list(verdict["blocking"])))
         audit=await self._call(self.auditor_family,"audit",{"question":question,
