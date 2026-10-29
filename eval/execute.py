@@ -15,7 +15,7 @@ from council.events import EventStore
 from council.full import FullCouncilRunner
 from council.transport import FamilyTransport,FamilyUnavailable
 from eval.tasks import load
-from eval.baselines import majority,best_of_n
+from eval.baselines import majority,best_of_n,family_vote
 from council.verify.arithmetic import check
 from answer_validation import matches_expected
 
@@ -60,6 +60,12 @@ async def run_task(task,transport,events,*,deadline,baseline_samples=3):
                                                  str(task["expected"])))
         else:base["correct"]=None
         output_base=[base]
+        single={"task_id":task["id"],"system":"single",
+                "answer":baseline_outputs[0],"calls":1,
+                "equal_budget":model_calls==1,"unresolved":False}
+        single["correct"]=(int(matches_expected(baseline_outputs[0],str(task["expected"])))
+                           if "expected" in task else None)
+        output_base.append(single)
         # Same arithmetic checker available to Council; gold answer is NOT used
         # for selection, only to score after choosing.
         independent=task.get("checker_expression")
@@ -82,7 +88,28 @@ async def run_task(task,transport,events,*,deadline,baseline_samples=3):
             else:best["correct"]=None
             output_base.append(best)
     else:output_base=[]
-    return [output]+output_base
+    # Plain cross-family voting is a distinct control from repeated gpt-oss.
+    # Six families are required; a provider endpoint never gets an extra vote.
+    family_outputs={}
+    families=("gpt-oss","command","gemma","nemotron","gemini","glm")
+    family_budget=RunBudget.start(deadline,reserve=0)
+    for family in families:
+        if family_budget.remaining()<=5:break
+        try:
+            answer=await transport.complete(family,q,family_budget,
+                                             role="baseline_vote6",synthesis=True)
+            family_outputs[family]=answer.text
+        except FamilyUnavailable:
+            continue
+    vote6=family_vote(family_outputs)
+    vote_row={"task_id":task["id"],"system":"vote6",
+              "answer":vote6.answer,"calls":vote6.calls,
+              "equal_budget":vote6.calls==model_calls,
+              "independent_families":len(family_outputs),
+              "unresolved":vote6.answer is None}
+    vote_row["correct"]=(int(matches_expected(str(vote6.answer or ""),
+                            str(task["expected"]))) if "expected" in task else None)
+    return [output]+output_base+[vote_row]
 
 async def execute(tasks,*,out_dir:Path,deadline:float,max_tasks:int,
                   baseline_samples:int):
@@ -113,7 +140,7 @@ def main(argv=None):
     if not 1<=args.max_tasks<=100 or not 1<=args.baseline_samples<=50:
         parser.error("Unsafe task or sample count")
     tasks=load(args.tasks,split=args.split)
-    upper_calls=args.max_tasks*(55+args.baseline_samples)
+    upper_calls=args.max_tasks*(55+args.baseline_samples+6)
     if not args.confirm_free:
         print(json.dumps({"mode":"plan_only","tasks":min(len(tasks),args.max_tasks),
                           "per_task_deadline":args.deadline,
