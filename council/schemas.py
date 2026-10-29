@@ -38,6 +38,8 @@ class AuthorResponseSchema(ModelSchema):
 class RevisedClaim(ModelSchema):
     claim_id:str=Field(min_length=1)
     statement:str=Field(min_length=1)
+    source_span:str|None=None
+    assumptions:list[str]=Field(default_factory=list)
 
 class Revision(ModelSchema):
     revised_approach:str|None=None
