@@ -34,3 +34,20 @@ async def sample(call,prompt,n,*,mode,verifier=None):
     if mode in {"self_consistency","vote6"}:return majority(outputs,mode)
     if mode=="best_of_n" and verifier:return best_of_n(outputs,verifier)
     raise ValueError("Unknown baseline or missing verifier")
+
+def family_vote(outputs_by_family, *, required_families=6):
+    """Count one answer per independent family; do not double count API mirrors.
+
+    Return unresolved if not enough families or no strict majority.
+    """
+    if not isinstance(outputs_by_family,dict):
+        raise ValueError("Family responses must be keyed by lineage")
+    if len(outputs_by_family)<required_families:
+        return Baseline("vote6",None,tuple(outputs_by_family.values()),
+                        len(outputs_by_family),"insufficient independent families")
+    if any(not family or not isinstance(answer,str)
+           for family,answer in outputs_by_family.items()):
+        raise ValueError("Invalid family response")
+    outcome=majority(list(outputs_by_family.values()),name="vote6")
+    return Baseline("vote6",outcome.answer,outcome.candidates,
+                    outcome.calls,outcome.reason)
