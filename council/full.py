@@ -377,11 +377,32 @@ class FullCouncilRunner(CouncilRunner):
                                              repairer,repairer,new_text[:2400]))
             except (EvidenceRejected,MessageCap):
                 continue
-            next_claim=self.ledger.revise(c.id,new_text)
-            next_claim.source_span=None
-            self.events.record("claim_revised",claim_id=c.id,
-                               version=next_claim.version,repairer=repairer)
-            self.extra_obligations.append(c.id+": validate revised meaning and source anchor")
+            # Repair is a NEW proposal linked to its challenged predecessor,
+            # not a retroactive modification that erases the disputed statement.
+            new_id=c.id+":repair"
+            if new_id in self.ledger.claims:
+                continue
+            anchored=validate_anchor(new_text,new_text,new_text,
+                 assumptions=string_list(suggestion,"assumptions"))
+            repair_claim=Claim(new_id,1,new_text,repairer,
+                 source_span=anchored.source_span,
+                 assumptions=list(anchored.assumptions),
+                 quantifiers=list(anchored.quantifiers))
+            self.ledger.add_claim(repair_claim)
+            if c.quantifiers and set(c.quantifiers)!=set(repair_claim.quantifiers):
+                self.warnings.append(new_id+": repair changed quantifiers; it is a different conjecture")
+            self.events.record("repair_claim_proposed",replaces=c.id,
+                 claim_id=new_id,source_family=repairer,source_span=new_text,
+                 version=1)
+            if self.budget.debate_remaining()>3:
+                # P4 returns the new claim to P2 and one P3 review, as the
+                # original proposal requires. Nothing becomes trusted by fiat.
+                await self._translate_and_check(repair_claim)
+                reviewer=next((f for f in self.solvers if f!=repairer),None)
+                if reviewer and self.budget.debate_remaining()>3:
+                    await self._hunt(repair_claim,reviewer,self.moderator.current_round)
+            if repair_claim.status is not ClaimStatus.SUPPORTED:
+                self.extra_obligations.append(new_id+": verify repaired meaning independently")
         brief=ResearchResult(research_question=question,
                              completion_status="partial")
         brief.hypotheses=list(dict.fromkeys(h for p in proposals for h in p["hypotheses"]))
