@@ -51,6 +51,8 @@ class FamilyTransport:
             for provider, settings in configured.items():
                 if isinstance(settings, dict) and 'shared_daily_requests' in settings:
                     self.quota.shared_daily[provider] = int(settings['shared_daily_requests'])
+                if isinstance(settings, dict) and 'shared_daily_tokens' in settings:
+                    self.quota.shared_daily_tokens[provider] = int(settings['shared_daily_tokens'])
         except (ValueError, TypeError, AttributeError):
             raise ValueError('Invalid COUNCIL_LIMITS_JSON')
 
@@ -80,10 +82,11 @@ class FamilyTransport:
             if allowed <= 1:
                 raise FamilyUnavailable(family, failures + ["deadline"])
             candidate = Candidate(entry.provider, entry.model)
+            estimated_tokens=max(1,len(message)//3)+1800
             try:
                 await self.quota.acquire(entry.provider, entry.model,
                     deadline=time.monotonic() + allowed,
-                    expected_tokens=max(1, len(message) // 3) + 1800)
+                    expected_tokens=estimated_tokens)
                 # Same allowlist/catalog safeguards as the original router.
                 options = await asyncio.wait_for(
                     asyncio.to_thread(self.router.expand, candidate, seen),
@@ -120,15 +123,29 @@ class FamilyTransport:
                 elapsed = time.monotonic() - t0
                 self.cache.success(entry.provider, entry.model)
                 self.quota.success(entry.provider, entry.model)
+                usage = (raw.get('body',{}).get('usage',{})
+                         if raw and isinstance(raw.get('body'),dict) else {})
+                if not usage and raw and isinstance(raw.get('body'),dict):
+                    usage=raw['body'].get('usageMetadata',{})
+                if not isinstance(usage,dict):usage={}
+                used_input = usage.get('prompt_tokens',usage.get('promptTokenCount'))
+                used_output = usage.get('completion_tokens',usage.get('candidatesTokenCount'))
                 if raw:
-                    self.quota.observe(entry.provider, entry.model, raw.get('headers', {}))
+                    self.quota.observe(entry.provider, entry.model,
+                        raw.get('headers', {}), input_tokens=used_input,
+                        output_tokens=used_output,
+                        reserved_tokens=estimated_tokens if used_input is not None
+                                          and used_output is not None else 0)
                 self.record("model_call_succeeded", role=role, family=family,
                             provider=entry.provider, model=entry.model,
                             seconds=elapsed, response=text,
                             prompt_hash=hashlib.sha256(message.encode()).hexdigest(),
                             status=raw.get('status') if raw else None,
                             headers=raw.get('headers') if raw else {},
-                            raw_body=raw.get('body') if raw else None)
+                            raw_body=raw.get('body') if raw else None,
+                            input_tokens=used_input,output_tokens=used_output,
+                            reported_model=(raw.get('body',{}).get('model')
+                                if raw and isinstance(raw.get('body'),dict) else None))
                 return CallResult(family, entry.provider, entry.model, text, elapsed,
                                   hashlib.sha256(message.encode()).hexdigest(),
                                   raw.get('body') if raw else None,
