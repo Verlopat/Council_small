@@ -42,6 +42,8 @@ class QuotaScheduler:
         self.locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
         self.shared_daily: dict[str, int] = {}
         self.shared_usage: dict[str, int] = defaultdict(int)
+        self.shared_daily_tokens: dict[str,int] = {}
+        self.shared_used_tokens: dict[str,int] = defaultdict(int)
 
     def configure(self, provider: str, model: str, *, rate_per_minute: float,
                   burst: int = 1, daily_requests: int | None = None,
@@ -68,6 +70,7 @@ class QuotaScheduler:
                 if today != state.day:
                     state.day, state.requests_today, state.tokens_today = today, 0, 0
                     self.shared_usage[provider] = 0
+                    self.shared_used_tokens[provider] = 0
                 if state.consecutive_failures >= 3 and state.cooldown_until > now:
                     raise QuotaContention("Provider circuit breaker open")
                 if state.daily_requests is not None and state.requests_today >= state.daily_requests:
@@ -78,6 +81,10 @@ class QuotaScheduler:
                 if (provider in self.shared_daily and
                     self.shared_usage[provider] >= self.shared_daily[provider]):
                     raise QuotaContention("Shared account allowance exhausted")
+                if (provider in self.shared_daily_tokens and
+                    self.shared_used_tokens[provider] + expected_tokens >
+                    self.shared_daily_tokens[provider]):
+                    raise QuotaContention("Shared account token allowance exhausted")
                 state.remaining = min(state.burst,
                     state.remaining + (now - state.refreshed_at) * state.rate_per_minute / 60)
                 state.refreshed_at = now
@@ -89,6 +96,7 @@ class QuotaScheduler:
                     state.requests_today += 1
                     state.tokens_today += expected_tokens
                     self.shared_usage[provider] += 1
+                    self.shared_used_tokens[provider] += expected_tokens
                     return
                 if now + wait >= deadline:
                     raise QuotaContention("No quota can arrive before request deadline")
@@ -96,7 +104,8 @@ class QuotaScheduler:
 
     def observe(self, provider: str, model: str, headers: dict,
                 *, input_tokens: int | None = None,
-                output_tokens: int | None = None) -> None:
+                output_tokens: int | None = None,
+                reserved_tokens: int = 0) -> None:
         state = self.state(provider, model)
         lowered = {str(k).lower(): str(v) for k, v in headers.items()}
         remaining = lowered.get("x-ratelimit-remaining-requests")
@@ -108,7 +117,11 @@ class QuotaScheduler:
         if input_tokens is not None or output_tokens is not None:
             # Reconcile with estimate separately at the caller; this is
             # authoritative observed usage, not an inferred token count.
-            state.tokens_today += max(0, int(input_tokens or 0)) + max(0, int(output_tokens or 0))
+            observed = max(0,int(input_tokens or 0)) + max(0,int(output_tokens or 0))
+            delta = observed - max(0,reserved_tokens)
+            state.tokens_today = max(0,state.tokens_today + delta)
+            self.shared_used_tokens[provider] = max(0,
+                self.shared_used_tokens[provider] + delta)
         ra = retry_after_seconds(lowered.get("retry-after"))
         if ra is not None and ra > 0:
             state.cooldown_until = max(state.cooldown_until, time.monotonic() + ra)
