@@ -15,6 +15,7 @@ from council.bus import MessageCap
 from council.evidence import EvidenceRejected
 from council.extract import validate_anchor
 from council.judge import blind_ledger, enforce_verdict, judge_failure
+from council.ledger import SQLiteLedger
 from council.models import Claim, ClaimStatus, Evidence, EvidenceKind, ResearchResult, Objection, AuthorResponse
 from council.moderator import Moderator
 from council.protocol import Message, Act
@@ -235,6 +236,8 @@ class FullCouncilRunner(CouncilRunner):
             result={"research_result":ResearchResult(question,completion_status="unresolved",
                     limitations=self.warnings).to_dict(),
                     "proposals":[],"claims":[],"warnings":self.warnings}
+            if hasattr(self.events,"db") and hasattr(self.events,"run_id"):
+                SQLiteLedger(self.events.db).save(self.events.run_id,self.ledger)
             self.events.record("run_finished",result=result)
             return result
         for i,p in enumerate(proposals):
@@ -518,6 +521,8 @@ class FullCouncilRunner(CouncilRunner):
             "verdict":verdict,"composition":asdict(composition),
             "requirements":req.as_data(),"actual_models":self.actual_models,
             "warnings":self.warnings}
+        if hasattr(self.events,"db") and hasattr(self.events,"run_id"):
+            SQLiteLedger(self.events.db).save(self.events.run_id,self.ledger)
         self.events.record("run_finished",result=result)
         return result
 
