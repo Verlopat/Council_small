@@ -61,7 +61,7 @@ class ScopedChecks(unittest.TestCase):
             self.assertIn("NOT executed",result.detail)
 
     def test_sandbox_mounts_are_isolated(self):
-        fake=SimpleNamespace(returncode=0,stdout='{"pass":true}'+"\\n",stderr="")
+        fake=SimpleNamespace(returncode=0,stdout='{"pass":true}',stderr="")
         with patch("council.verify.sandbox.available",return_value=True), \
              patch("council.verify.sandbox.subprocess.run",return_value=fake) as execute:
             output=run_python("print('sandbox')")
