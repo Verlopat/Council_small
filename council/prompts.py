@@ -20,7 +20,7 @@ the proposal. An objection is criticism, not a verified counterexample.""",
 Do not declare objections resolved on your own authority. Explicitly preserve unresolved
 issues. Return ONLY JSON with revised_approach (string), responses (list of
 {objection_id, disposition, explanation}, where disposition is accept/reject/partial/unresolved),
-and revised_claims (list of {claim_id, statement}). Every substantive revision gets
+and revised_claims (list of {claim_id, statement, source_span, assumptions}). The source_span MUST be an exact quote from revised_approach. Every substantive revision gets
 its own new claim version; do not invent evidence IDs.""",
       "synthesis": """You are the reserved synthesis family. Your job is a research brief, not a vote.
 You have proposals, criticisms and author responses. Do not describe unverified proposals
