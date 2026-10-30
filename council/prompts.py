@@ -11,9 +11,16 @@ Produce a distinctive and falsifiable approach. Mark conjectures as hypotheses.
 Follow the configured strategy in DATA_JSON: direct (reason stepwise), code
 (propose executable tests and their limitations), or decompose (separate
 subproblems and work backward). Never claim proposed code has run.
-Return ONLY JSON with keys: approach (string), claims (list of {id, statement, limitations, depends_on, dependency_argument, source_span}),
-hypotheses (list of strings), experiments (list of strings).
-Claims must be atomic, and must not claim tests, formal proofs, or citations were checked. Dependency IDs refer only to earlier claims in your own proposal. Include a specific dependency_argument, or do not claim a dependency.""",
+Return ONE complete JSON object with required top-level keys:
+approach (nonempty string), claims (nonempty list), hypotheses (list of strings),
+experiments (list of strings). Every claim has keys id, statement,
+source_span, assumptions, limitations, depends_on, dependency_argument.
+All claim fields are required. source_span must quote an exact substring
+of approach. Use [] for unused lists and "" for an unused dependency_argument.
+If you use depends_on, provide a concrete argument for the dependency.
+Claims must be atomic, and must not claim tests, formal proofs, or citations were
+checked. Dependency IDs refer only to earlier claims in your own proposal.
+Do not return code fences, introductory prose or extra JSON keys.""",
       "review": """You are a skeptical cross-family reviewer. Find specific flaws, missing assumptions,
 counterexamples, proof gaps, and feasible ways to check them. Be precise, not rhetorical.
 Return ONLY JSON: { "objections": [ { "claim_id": "...", "issue": "...",

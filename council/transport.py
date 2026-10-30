@@ -17,6 +17,7 @@ from router_errors import CandidateError
 from router_health import HealthCache
 from council.budget import RunBudget
 from council.families import endpoint_list
+from council.structured import response_format as model_response_format
 from council.quota import QuotaScheduler, QuotaContention
 
 class FamilyUnavailable(RuntimeError):
@@ -82,7 +83,9 @@ class FamilyTransport:
             if allowed <= 1:
                 raise FamilyUnavailable(family, failures + ["deadline"])
             candidate = Candidate(entry.provider, entry.model)
-            estimated_tokens=max(1,len(message)//3)+1800
+            # More room for claim spans; reserve tokens before opening a call.
+            output_tokens = 2800 if role == "proposal" else 1800
+            estimated_tokens=max(1,len(message)//3)+output_tokens
             try:
                 await self.quota.acquire(entry.provider, entry.model,
                     deadline=time.monotonic() + allowed,
@@ -102,6 +105,7 @@ class FamilyTransport:
                 system_text, user_text = (message.split(sep, 1)
                     if message.startswith('SYSTEM ROLE:') and sep in message
                     else (None, message))
+                formatting = model_response_format(entry.provider, entry.model, role)
                 self.record("model_call_started", role=role, family=family,
                             provider=entry.provider, model=entry.model,
                             prompt_hash=hashlib.sha256(message.encode()).hexdigest())
@@ -111,12 +115,13 @@ class FamilyTransport:
                         return generate_process(
                             entry.provider, entry.model, user_text,
                             system_text=system_text, timeout=timeout,
-                            max_tokens=1800)
+                            max_tokens=output_tokens, response_format=formatting)
                     captured = []
                     token = RAW_CAPTURE.set(captured)
                     try:
                         opts = dict(probe=False, request_timeout=max(0.5, timeout - 0.5),
-                                    max_output_tokens=1800)
+                                    max_output_tokens=output_tokens,
+                                    response_format=formatting)
                         if system_text:
                             opts['system_text'] = system_text
                         answer = self.router.generate(candidate, user_text, **opts)

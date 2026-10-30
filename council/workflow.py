@@ -37,25 +37,65 @@ class CouncilRunner:
         if self.budget.allowed(30, synthesis=synthesis) <= 1:
             self.warnings.append(role + "/" + family + ": deadline reached")
             return None
-        try:
-            response = await self.transport.complete(
-                family, prompt(role, data), self.budget, role=role,
-                synthesis=synthesis)
-        except FamilyUnavailable as exc:
-            self.warnings.append(role + "/" + family + ": " + "; ".join(exc.failures))
-            self.events.record("role_unavailable", role=role, family=family,
-                               failures=exc.failures)
-            return None
-        self.actual_models.append({"role": role, "family": family,
-                                   "provider": response.provider, "model": response.model,
-                                   "prompt_hash": response.prompt_hash})
-        try:
-            return validate_output(role, parse_object(response.text))
-        except (OutputError, ValueError) as error:
-            self.warnings.append(role + "/" + family + ": invalid structured output")
-            self.events.record("role_parse_error", role=role, family=family,
-                               provider=response.provider, model=response.model)
-            return None
+
+        original_message = prompt(role, data)
+        # Proposals are the only stage eligible for one format retry. The
+        # original task and role remain unchanged; never feed untrusted output
+        # back to the model as instructions or bypass schema validation.
+        for attempt in range(2 if role == "proposal" else 1):
+            if attempt:
+                separator = "\nDATA_JSON:\n"
+                if separator not in original_message:
+                    self.warnings.append(role + "/" + family +
+                                         ": format retry unavailable")
+                    return None
+                message = original_message.replace(
+                    separator,
+                    "\nFORMAT RETRY: Previous generation did not satisfy the JSON "
+                    "proposal contract. Output ONE complete JSON object with "
+                    "nonempty approach and at least one anchored claim. "
+                    "Required claim keys: id, statement, source_span, "
+                    "assumptions, limitations, depends_on, dependency_argument. "
+                    "Also include hypotheses and experiments lists. "
+                    "Source spans must be exact quotations from approach. "
+                    "Do not add markdown or invented verification.\n" +
+                    separator,
+                    1)
+            else:
+                message = original_message
+            try:
+                response = await self.transport.complete(
+                    family, message, self.budget, role=role,
+                    synthesis=synthesis)
+            except FamilyUnavailable as exc:
+                self.warnings.append(role + "/" + family + ": " + "; ".join(exc.failures))
+                self.events.record("role_unavailable", role=role, family=family,
+                                   failures=exc.failures)
+                return None
+            self.actual_models.append({"role": role, "family": family,
+                                       "provider": response.provider,
+                                       "model": response.model,
+                                       "prompt_hash": response.prompt_hash})
+            try:
+                return validate_output(role, parse_object(response.text))
+            except (OutputError, ValueError) as error:
+                # Never print raw user prompts or provider text in diagnostics;
+                # output/schema error strings describe only parser constraints.
+                reason = str(error).splitlines()[0][:180]
+                self.events.record("role_parse_error", role=role, family=family,
+                                   provider=response.provider, model=response.model,
+                                   reason=reason, attempt=attempt + 1)
+                if (role == "proposal" and attempt == 0 and
+                        self.budget.allowed(30, synthesis=synthesis) > 2):
+                    self.events.record("format_retry_requested",
+                                       role=role, family=family,
+                                       failed_model=response.model,
+                                       reason=reason)
+                    continue
+                self.warnings.append(role + "/" + family +
+                                     ": invalid structured output (" + reason + ")")
+                return None
+        return None
 
     def _proposal(self, family: str, body: dict, index: int) -> dict:
         approach = require_string(body, "approach")

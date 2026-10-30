@@ -86,22 +86,31 @@ This working branch is intentionally **production-oriented**: the standalone uni
 
 ## When quick mode returns unresolved before a proposal
 
-A dry-run verifies role allocation only; it makes **zero** provider requests.
-If the quick result reports `proposal/gpt-oss: Groq/...: output_truncated`,
-the provider exhausted its completion budget. Council GPT-OSS requests now
-select Groq's documented `reasoning_effort=low` for structured role prompts
-(the standalone router retains its prior default). You can override this with
-`COUNCIL_GROQ_REASONING_EFFORT=medium` or `high` if needed.
+A dry run checks allocation only. If quick mode fails on `proposal/gpt-oss`,
+the model may have answered in prose, produced incomplete JSON, or omitted
+required proposal fields.
 
-Other explicit causes include `empty_final_answer`, `invalid_response`,
-`rate_limit`, `auth`, `billing_required`, and `connection`. Do not
-paste API keys, private `.env` contents or full provider headers into issues.
+For Council role calls, Groq GPT-OSS now uses low reasoning effort and:
+- **Proposals:** strict JSON Schema structured outputs, requiring an approach,
+  atomic claims with quoted source spans, hypotheses and experiments.
+- **Other roles:** JSON object mode (syntactic only; local validation still applies).
+- **Failure handling:** one additional proposal-format attempt, within the same
+  family and remaining deadline/free quota. The raw failed answer is never
+  inserted as privileged instructions. A second failure returns `unresolved`
+  with its actual parser or schema problem rather than a generic label.
 
-Check the standalone Groq adapter with one inexpensive real request:
+These request constraints are supported for Groq GPT-OSS, but **have not
+been live-tested on your account**. Other providers remain on their existing
+paths. The local coordinator still checks claim anchors and scoped evidence;
+correct JSON is not proof of the response's mathematics or security.
+
+A small, opt-in connectivity check remains:
+
 ```bash
 python simple_router.py --only-provider Groq --retries 0 --timeout 30 --expect 156 "What is 12 multiplied by 13?"
 ```
-If it succeeds but the Council still fails, the difference is likely the
-structured role prompt and its generation limit rather than key connectivity.
-Wait for the model's recorded health cooldown to expire before retrying.
 
+Once you `git pull origin main`, retry your real quick question. If it still
+returns `unresolved`, the recorded error reason can be inspected safely
+from the local `runs/RUN_ID.sqlite3` event log without exposing the model
+response, prompts or API keys.

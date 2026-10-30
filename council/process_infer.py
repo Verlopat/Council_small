@@ -10,7 +10,8 @@ from typing import Any
 from router_errors import CandidateError
 
 def _provider_worker(connection, provider: str, model: str, prompt: str,
-                     system_text: str | None, timeout: float, max_tokens: int):
+                     system_text: str | None, timeout: float, max_tokens: int,
+                     response_format: dict | None):
     try:
         from model_router import RAW_CAPTURE, Candidate, Router
         captured = []
@@ -19,7 +20,8 @@ def _provider_worker(connection, provider: str, model: str, prompt: str,
             answer = Router(timeout=timeout).generate(
                 Candidate(provider, model), prompt, probe=False,
                 request_timeout=max(.5,timeout-.5),
-                max_output_tokens=max_tokens, system_text=system_text)
+                max_output_tokens=max_tokens, system_text=system_text,
+                response_format=response_format)
             output = {"ok":True,"answer":answer,
                       "raw":captured[-1] if captured else None}
         finally:
@@ -38,14 +40,15 @@ def _provider_worker(connection, provider: str, model: str, prompt: str,
 
 def generate(provider: str, model: str, prompt: str, *,
              system_text: str | None, timeout: float,
-             max_tokens: int = 1800) -> tuple[str, dict | None]:
+             max_tokens: int = 1800,
+             response_format: dict | None = None) -> tuple[str, dict | None]:
     if not 0 < timeout <= 120 or not 1 <= max_tokens <= 8192:
         raise ValueError("Invalid bounded process request")
     ctx = mp.get_context("spawn")
     receiving, sending = ctx.Pipe(duplex=False)
     child = ctx.Process(target=_provider_worker,
                         args=(sending,provider,model,prompt,system_text,
-                              timeout,max_tokens),daemon=True)
+                              timeout,max_tokens,response_format),daemon=True)
     try:
         child.start()
         sending.close()

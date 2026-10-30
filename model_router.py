@@ -229,7 +229,8 @@ class Router:
     def generate(self, candidate: Candidate, prompt: str, *, probe: bool = False,
                  request_timeout: float | None = None,
                  max_output_tokens: int | None = None,
-                 system_text: str | None = None) -> str:
+                 system_text: str | None = None,
+                 response_format: dict | None = None) -> str:
         """A probe is an actual short inference, not just a model lookup."""
         provider, model = candidate.provider, candidate.model
         key = os.getenv(KEY_NAMES[provider], '').strip()
@@ -345,6 +346,11 @@ class Router:
                     raise CandidateError('Invalid Council Groq reasoning setting',
                                          kind='request_invalid')
                 payload['reasoning_effort'] = effort
+            if response_format is not None:
+                if provider != 'Groq' or probe or not isinstance(response_format, dict):
+                    raise CandidateError('Unsupported response formatting policy',
+                                         kind='request_invalid')
+                payload['response_format'] = response_format
             result = api_call('POST', endpoint, key=key,
                               payload=payload, timeout=timeout)
             raw, _ = extract_openai(result)
