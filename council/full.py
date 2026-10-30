@@ -351,10 +351,16 @@ class FullCouncilRunner(CouncilRunner):
         for (claim, hunter_family, round_number), result in zip(admissible, results):
             if not result or not result.get("found"):
                 if result is not None:
-                    self.moderator.bus.close(claim.id, "agents_gave_up")
-                    self.events.record("stalemate", claim_id=claim.id,
-                                       cause="agents_gave_up",
-                                       hunter_family=hunter_family)
+                    previous = self.moderator.bus.stalemates().get(claim.id)
+                    if previous is None:
+                        self.moderator.bus.close(claim.id, "agents_gave_up")
+                        self.events.record("stalemate", claim_id=claim.id,
+                                           cause="agents_gave_up",
+                                           hunter_family=hunter_family)
+                    else:
+                        self.events.record("hunter_abstained", claim_id=claim.id,
+                                           hunter_family=hunter_family,
+                                           prior_stalemate_cause=previous)
                 continue
             detail = result.get("counterexample")
             if not isinstance(detail, str) or not detail.strip():

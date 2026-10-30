@@ -22,7 +22,7 @@ class ConfigurationTests(unittest.TestCase):
     def test_phase_a_is_plan_only(self):
         root=Path(__file__).resolve().parents[1]
         rows=plan(root/"eval"/"tasks"/"dev_research.jsonl",runs=3,call_budget=5)
-        self.assertEqual(len(rows),9)
+        self.assertEqual(len(rows),90)
         self.assertTrue(all(r.council_calls_budget==r.baseline_calls_budget for r in rows))
     def test_formal_proof_adapter_rejects_holes(self):
         output=check("lean","theorem foo : True := by sorry")

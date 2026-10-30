@@ -36,7 +36,8 @@ class Moderator:
         try:
             result = self.bus.deliver(msg)
         except MessageCap:
-            self.events("stalemate", claim_id=msg.thread, cause="cap_hit")
+            cause = self.bus.stalemates().get(msg.thread, "cap_hit")
+            self.events("stalemate", claim_id=msg.thread, cause=cause)
             raise
         if result == "duplicate":
             self.events("dedupe_dropped", claim_id=msg.thread, message_id=msg.id)

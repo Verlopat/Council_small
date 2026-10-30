@@ -32,6 +32,16 @@ class StalemateTests(unittest.TestCase):
         self.assertEqual(bus.deliver(msg("3",Act.ASK,"What is the witness?")),"duplicate")
         self.assertEqual(bus.stalemates()["c"],"dedupe_dropped")
 
+    def test_repair_from_closed_thread_consumes_cap_without_reopening(self):
+        ledger=ClaimLedger()
+        ledger.add_claim(Claim("c",1,"Unproved","gpt-oss"))
+        moderator=Moderator(ledger)
+        moderator.bus.close("c","no_evidence_possible")
+        self.assertTrue(moderator.authorize_repair_from_stalemate("c","nemotron"))
+        self.assertFalse(moderator.authorize_repair_from_stalemate("c","nemotron"))
+        self.assertEqual(moderator.bus.stalemates()["c"],"no_evidence_possible")
+        self.assertEqual(moderator.bus.threads["c"].repairs,1)
+
     def test_moderator_abstain_and_cap_hit(self):
         ledger=ClaimLedger()
         ledger.add_claim(Claim("c",1,"Open","gpt-oss"))
