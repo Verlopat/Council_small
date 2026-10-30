@@ -19,6 +19,9 @@ COOLDOWN_SECONDS = {
     "server": 30,
     "connection": 30,
     "invalid_response": 45,
+    "empty_final_answer": 20,
+    "output_truncated": 15,
+    "content_filtered": 60,
     "request_invalid": 45,
     "other": 30,
 }

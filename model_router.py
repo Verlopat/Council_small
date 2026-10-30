@@ -99,14 +99,18 @@ def api_call(method: str, url: str, *, key: str | None = None,
 def extract_openai(obj: dict) -> tuple[str, str]:
     choices = obj.get('choices') or []
     if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
-        raise CandidateError('No choices in response')
+        raise CandidateError('No choices in response', kind='invalid_response')
     choice = choices[0]
     reason = choice.get('finish_reason')
-    if reason in ('length', 'content_filter'):
-        raise CandidateError(f'Generation stopped: {reason}')
+    if reason == 'length':
+        raise CandidateError('Generation exceeded output token allowance',
+                             kind='output_truncated')
+    if reason == 'content_filter':
+        raise CandidateError('Provider stopped generation for safety review',
+                             kind='content_filtered')
     msg = choice.get('message') or {}
     if not isinstance(msg, dict):
-        raise CandidateError('Missing message in response')
+        raise CandidateError('Missing message in response', kind='invalid_response')
     content = msg.get('content')
     if isinstance(content, list):
         content = '\n'.join(str(x.get('text', '')) for x in content if isinstance(x, dict))
@@ -119,9 +123,10 @@ def clean_answer(raw: str) -> str:
     output = re.sub(r'<think\b[^>]*>.*?</think\s*>', '\n', raw,
                     flags=re.IGNORECASE | re.DOTALL).strip()
     if re.search(r'</?think\b', output, flags=re.IGNORECASE):
-        raise CandidateError('Malformed or incomplete reasoning markup')
+        raise CandidateError('Malformed or incomplete reasoning markup',
+                             kind='invalid_response')
     if not output:
-        raise CandidateError('Empty final answer')
+        raise CandidateError('Empty final answer', kind='empty_final_answer')
     # Some models repeat the same answer on both sides of a thinking block.
     # The newline separator prevents accidental concatenation to 156156.
     lines = [line.strip() for line in output.splitlines() if line.strip()]
@@ -314,7 +319,8 @@ class Router:
                               payload={'model': model, 'messages': messages,
                                        'stream': False}, timeout=timeout)
             if result.get('done_reason') in ('length', 'unload'):
-                raise CandidateError('Ollama generation incomplete')
+                raise CandidateError('Ollama generation incomplete',
+                                     kind='output_truncated')
             raw = (result.get('message') or {}).get('content', '')
         else:
             endpoint = {
@@ -326,12 +332,24 @@ class Router:
             }[provider]
             if provider == 'LLM7.io':
                 self._pace_llm7()
+            payload = {'model': model, 'messages': messages,
+                       'max_tokens': token_limit, 'stream': False}
+            # Groq GPT-OSS spends part of the response limit on reasoning.
+            # Council tasks use structured multi-field JSON, so low reasoning
+            # effort reduces avoidable output-length failures. Keep ordinary
+            # direct router calls at the provider's default for compatibility.
+            if (provider == 'Groq' and model.startswith('openai/gpt-oss-')
+                    and system_text and not probe):
+                effort = os.getenv('COUNCIL_GROQ_REASONING_EFFORT', 'low').strip().lower()
+                if effort not in {'low', 'medium', 'high'}:
+                    raise CandidateError('Invalid Council Groq reasoning setting',
+                                         kind='request_invalid')
+                payload['reasoning_effort'] = effort
             result = api_call('POST', endpoint, key=key,
-                              payload={'model': model, 'messages': messages,
-                                       'max_tokens': token_limit, 'stream': False}, timeout=timeout)
+                              payload=payload, timeout=timeout)
             raw, _ = extract_openai(result)
         if not isinstance(raw, str):
-            raise CandidateError('Invalid final answer format')
+            raise CandidateError('Invalid final answer format', kind='invalid_response')
         return clean_answer(raw)
 
     def ask(self, prompt: str, ordered: list[Candidate], *, expected: str | None = None,

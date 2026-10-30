@@ -55,6 +55,10 @@ def from_http(status_code: int, response_text: str = "",
         return CandidateError(f"HTTP {status_code}: invalid API credentials", kind="auth")
     if status_code == 403:
         return CandidateError("HTTP 403: API access denied", kind="auth")
+    if status_code == 402:
+        # Never interpret an account demanding payment as a retryable success.
+        return CandidateError("HTTP 402: payment or free credit required",
+                              kind="billing_required")
     if status_code == 429:
         return CandidateError("HTTP 429: rate limit/quota", kind="rate_limit",
                               retry_after=retry_after_seconds(retry_after))

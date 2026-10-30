@@ -83,3 +83,25 @@ python -m council.provider_diagnostics
 See [Implementation Matrix](IMPLEMENTATION_MATRIX.md) for requirement boundaries.
 
 This working branch is intentionally **production-oriented**: the standalone unit-test suite and its offline-test CI workflow were removed from `main`. They remain recoverable through Git history. Removing tests does not establish correctness or replace deployment validation.
+
+## When quick mode returns unresolved before a proposal
+
+A dry-run verifies role allocation only; it makes **zero** provider requests.
+If the quick result reports `proposal/gpt-oss: Groq/...: output_truncated`,
+the provider exhausted its completion budget. Council GPT-OSS requests now
+select Groq's documented `reasoning_effort=low` for structured role prompts
+(the standalone router retains its prior default). You can override this with
+`COUNCIL_GROQ_REASONING_EFFORT=medium` or `high` if needed.
+
+Other explicit causes include `empty_final_answer`, `invalid_response`,
+`rate_limit`, `auth`, `billing_required`, and `connection`. Do not
+paste API keys, private `.env` contents or full provider headers into issues.
+
+Check the standalone Groq adapter with one inexpensive real request:
+```bash
+python simple_router.py --only-provider Groq --retries 0 --timeout 30 --expect 156 "What is 12 multiplied by 13?"
+```
+If it succeeds but the Council still fails, the difference is likely the
+structured role prompt and its generation limit rather than key connectivity.
+Wait for the model's recorded health cooldown to expire before retrying.
+
