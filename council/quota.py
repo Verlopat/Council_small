@@ -135,7 +135,9 @@ class QuotaScheduler:
         state = self.state(provider, model)
         state.consecutive_failures += 1
         delay = retry_after if retry_after is not None else min(60.0, 2.0 ** state.consecutive_failures)
-        if kind in {"rate_limit", "auth"} or state.consecutive_failures >= 3:
+        if kind == "billing_required":
+            state.cooldown_until = time.monotonic() + 86400.0
+        elif kind in {"rate_limit", "auth"} or state.consecutive_failures >= 3:
             state.cooldown_until = time.monotonic() + min(86400.0, max(1.0, delay))
 
     def success(self, provider: str, model: str) -> None:

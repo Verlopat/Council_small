@@ -23,6 +23,42 @@ def scan_vrf_games(question: str, claims) -> list[dict]:
         if not isinstance(statement, str) or not isinstance(cid, str):
             continue
         text = " ".join(statement.split())
+        # The game type can be valid even if the model uses signature
+        # terminology; flag the ambiguity rather than silently equating APIs.
+        if re.search(r"\bsigning\s+oracle\b",text,re.I) and (
+                FULL.search(text) or TRUSTED.search(text) or PSEUDO.search(text)):
+            findings.append({
+                "claim_id":cid,"kind":"vrf_signing_oracle_terminology",
+                "message":"The game specifies a signing oracle. Distinguish "
+                          "ordinary VRF evaluation/proof access from a "
+                          "signature oracle; uniqueness does not need an "
+                          "oracle to define its two-output win condition.",
+                "reference":"RFC 9381 Sections 3.1–3.4"})
+        if TRUSTED.search(text) and re.search(
+                r"\bnever\s+(?:leaked|exposed|revealed|disclosed)\b|"
+                r"\b(?:kept|remains?)\s+secret\b|"
+                r"\bwithout\s+(?:access\s+to\s+|knowledge\s+of\s+|the\s+)"
+                r"(?:secret\s+key|SK)\b", text,re.I):
+            findings.append({
+                "claim_id":cid,"kind":"trusted_uniqueness_secret_key_contradiction",
+                "message":"This trusted-uniqueness claim appears to require "
+                          "the secret key to remain hidden. RFC 9381 Section "
+                          "3.3 explicitly requires uniqueness even when "
+                          "honestly generated SK and PK are known. This is "
+                          "a likely definition contradiction, not merely an "
+                          "omitted assumption.",
+                "reference":"RFC 9381 Section 3.3"})
+        if (re.search(r"\buniqueness\b",text,re.I)
+                and re.search(r"uniquely\s+determined\s+by.{0,65}"
+                              r"(?:input|x).{0,45}(?:secret\s+key|SK)",
+                              text,re.I)):
+            findings.append({
+                "claim_id":cid,"kind":"uniqueness_wrong_key_quantifier",
+                "message":"VRF uniqueness constrains accepted outputs for "
+                          "each fixed public key and input, rather than "
+                          "assuming the verifier knows or trusts a secret "
+                          "key. Check the intended key quantifier.",
+                "reference":"RFC 9381 Section 3.1"})
         if PSEUDO.search(text):
             # A challenger should not disclose a valid proof for the
             # pseudorandomness challenge. Flag only affirmative descriptions,

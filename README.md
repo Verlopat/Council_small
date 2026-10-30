@@ -232,3 +232,59 @@ git pull origin main
 python -m council.cli --mode quick --deadline 180 \
   "Explain VRF full uniqueness, trusted uniqueness, and pseudorandomness games"
 ```
+
+## RFC 9381 local reference and low-quota definition checking
+
+RFC 9381 §3 is the reference for the game **definitions**, not a generic
+proof that any lattice VRF is secure. To index the complete official RFC on
+your machine (with its original copyright and legal notices), run:
+
+```bash
+python -m council.rfc_index --db runs/papers.sqlite3
+python -m council.cli --mode quick --deadline 180 \
+  --paper-index runs/papers.sqlite3 \
+  "Explain full uniqueness, trusted uniqueness, and pseudorandomness games of a VRF"
+```
+
+The first command explicitly downloads from
+`https://www.rfc-editor.org/rfc/rfc9381.txt` and saves the **complete**
+document to a local git-ignored SQLite index, not to the repository. It can
+also import an already-downloaded official RFC with
+`python -m council.rfc_index --text-file /path/to/rfc9381.txt`.
+The IETF Trust FAQ allows reproduction of complete RFCs; source text is kept
+with its notices. See https://trustee.ietf.org/about/faq/ and consult the
+current legal provisions before redistributing excerpts or derivative works.
+
+For recognizable VRF game-definition claims, quick/full mode now **skips
+GLM translation**, consults the locally indexed official reference heading,
+and records a provenance-only check. A heading match does **not** certify
+the definition, prove security, or turn a claim into `supported` or
+`contradicted`. A model-generated paraphrase may be wrong despite the
+reference being present. Claims of proofs, reductions, implementations and
+numeric results still take the normal verification route.
+
+A short redundant conclusion beginning "These definitions capture..." can
+be excluded from the VRF claim ledger to avoid an unnecessary translator
+call; it remains in the solver's original explanation. The advisory checker
+also looks for trusted uniqueness that wrongly demands secret-key secrecy,
+"signing oracle" terminology, and uniqueness mistakenly quantified by
+the secret key. All heuristic alerts are non-certifying.
+
+**Quick mode now saves a Gemini call by default.** It uses deterministic
+ledger-policy judgment, not an LLM review, and labels this distinction in
+the CLI. To explicitly run the original blind Gemini judge in quick mode:
+
+```bash
+COUNCIL_QUICK_LLM_JUDGE=1 python -m council.cli --mode quick \
+  --paper-index runs/papers.sqlite3 --deadline 180 "Explain VRF security games"
+```
+
+**Provider policy:** a completed timeout may be retried **once** if there
+is enough deadline and a second request is reserved against the quota.
+An asyncio thread-cancellation timeout is not retried (the old HTTP thread
+could still be running). HTTP 429 `Retry-After` is honored in persistent
+health cooldown and the in-process quota scheduler, up to 24 hours.
+HTTP 402 (payment/free-credit required) blocks that provider for 24 hours
+instead of prompting automatic paid usage. These changes do not grant
+additional free allowance or fix exhausted daily quotas. They have not
+been live-tested with your provider credentials.

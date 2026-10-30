@@ -228,8 +228,11 @@ def main(argv=None) -> int:
         verdict = result.get("verdict")
         if isinstance(verdict, dict):
             detail = verdict.get("cause")
-            print("Judge verdict: " + str(verdict.get("status", "unresolved")) +
-                  (" | cause: " + str(detail) if detail else ""))
+            source = result.get("judge_source", "model")
+        label = ("Local evidence verdict" if source == "local_policy"
+                 else "Judge verdict")
+        print(label + ": " + str(verdict.get("status", "unresolved")) +
+              (" | cause: " + str(detail) if detail else ""))
         print("\nProposed approach (solver original):\n" +
               (brief["proposed_approach"] or "(none)"))
         if brief.get("judge_summary"):
@@ -243,6 +246,12 @@ def main(argv=None) -> int:
             "\n".join("- " + str(item.get("claim_id", "")) + ": " +
                       str(item.get("message", "")) for item in advisory)
             or "(none detected; this does not establish correctness)"))
+        references = result.get("reference_checks", [])
+        if references:
+            print("\nLocal RFC source lookups (provenance only):\n" +
+                  "\n".join("- " + item.get("claim_id", "") + ": §" +
+                            str(item.get("section", "")) + " — " +
+                            str(item.get("reason", "")) for item in references))
         print("\nUnverified claims and proof obligations:\n" + (
             "\n".join("- " + x for x in brief.get("proof_obligations", []))
             or "(none)"))

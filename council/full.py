@@ -9,6 +9,8 @@ from dataclasses import asdict
 import hashlib
 import json
 import time
+import os
+from types import SimpleNamespace
 
 from council.assignment import Assignment
 from council.dependencies import Dependency
@@ -28,6 +30,7 @@ from council.compose import compose_answer
 from council.workflow import CouncilRunner
 from council.requirements import Requirements
 from council.vrf_sanity import scan_vrf_games
+from council.definition_sources import classify as definition_kind, consult as consult_definition, is_summary
 
 # Four-solvers variant would leave no reliable independently reserved auditing
 # family given the currently configured MiniMax limitation, so default to three.
@@ -85,6 +88,7 @@ class FullCouncilRunner(CouncilRunner):
         self.paper_index=paper_index
         self.checked_sources=set()
         self.extra_obligations=[]
+        self.reference_checks=[]
         self._translator_unavailable=False
         self.objections=[]
         self.author_responses=[]
@@ -195,6 +199,24 @@ class FullCouncilRunner(CouncilRunner):
                         dependent.id + ": dependency rejected (" + str(exc) + ")")
 
     async def _translate_and_check(self,claim:Claim):
+        if is_summary(claim.statement):
+            self.events.record("redundant_summary_skipped",claim_id=claim.id)
+            self.extra_obligations.append(
+                claim.id+": redundant summary; evaluate its underlying claims")
+            return
+        definition=definition_kind(self.requirements.objective
+                    if self.requirements else self._current_question,
+                    claim.statement)
+        if definition is not None:
+            heading, section=definition
+            result=consult_definition(self.paper_index,heading,section,claim.id)
+            self.reference_checks.append(result)
+            self.events.record("definition_reference_checked",**result)
+            self.extra_obligations.append(claim.id+": RFC 9381 Section "+section+
+                (" reference heading located; meaning remains unverified"
+                 if result["heading_found"] else
+                 " not indexed; index the official RFC for provenance"))
+            return
         if self._translator_unavailable:
             self.extra_obligations.append(
                 claim.id+": translator unavailable after earlier failures in this run")
@@ -435,6 +457,7 @@ class FullCouncilRunner(CouncilRunner):
         if not isinstance(question,str) or not question.strip():
             raise ValueError("Question required")
         req=self.requirements or Requirements(question)
+        self._current_question=question
         self.events.record("run_started",question=question,mode=mode,
             pipeline="evidence",
             requirements=req.as_data(),role_assignment=asdict(self.assignment),
@@ -449,6 +472,15 @@ class FullCouncilRunner(CouncilRunner):
             for family in self.solvers])
         for index,(family,body) in enumerate(zip(self.solvers,raw),1):
             if body is None:continue
+            if "VRF" in question.upper() or "verifiable random function" in question.lower():
+                distinct=[c for c in body.get("claims",[])
+                          if not is_summary(c.get("statement",""))]
+                removed=len(body.get("claims",[]))-len(distinct)
+                if removed:
+                    self.events.record("summary_claims_filtered",
+                        family=family,removed=removed)
+                    if distinct:
+                        body=dict(body,claims=distinct)
             try:
                 p=self._proposal(family,body,index)
                 self._anchors(p,body)
@@ -713,7 +745,10 @@ class FullCouncilRunner(CouncilRunner):
                     if (hunter := next((f for f in self.solvers
                                         if f != claim.owner_family), None))]
             await self._hunt_batch(jobs)
-        advisory_findings=scan_vrf_games(question,self.ledger.claims.values())
+        advisory_findings=scan_vrf_games(
+            question, list(self.ledger.claims.values()) +
+            [SimpleNamespace(id=p["id"]+":approach",statement=p["approach"])
+             for p in proposals])
         if advisory_findings:
             self.events.record("advisory_game_red_flags",
                 findings=advisory_findings,
@@ -760,9 +795,22 @@ class FullCouncilRunner(CouncilRunner):
             "question_requirements":req.as_data(),
             "argument_map":[{"claim_id":x["claim_id"],"evidence_id":x["evidence_id"]}
                             for x in self.verified]}
-        # _call already performs at most one schema/format retry for a judge.
-        # Avoid a second independent call that would silently spend more quota.
-        candidate=await self._call(self.judge_family,"judge",judge_payload,synthesis=True)
+        # Quick mode is a low-quota draft/verification preview, not peer
+        # review. Use the deterministic evidence policy by default; opt in
+        # to spending a model judge call with COUNCIL_QUICK_LLM_JUDGE=1.
+        local_judge=(mode=="quick" and
+                     os.getenv("COUNCIL_QUICK_LLM_JUDGE","0")!="1")
+        if local_judge:
+            candidate={"status":"unresolved","blocking":[],
+                       "basis":["Deterministic local evidence policy"]}
+            self.events.record("quick_judge_skipped",reason="save_free_tier_quota")
+            brief.judge_summary=(
+                "Local evidence policy: claims require independently "
+                "scoped verification; quick mode has no peer reviewers.")
+        else:
+            # _call already retries a malformed judge response once.
+            candidate=await self._call(
+                self.judge_family,"judge",judge_payload,synthesis=True)
         verdict=enforce_verdict(candidate or {"status":"unresolved",
             "partial_answer":brief.proposed_approach,"cause":"judge_error"},
             self.ledger)
@@ -772,7 +820,7 @@ class FullCouncilRunner(CouncilRunner):
         # when the judge returns a valid but unhelpfully short summary.
         if isinstance(partial,str) and partial.strip():
             brief.judge_summary=partial.strip()
-        else:
+        elif not local_judge:
             self.events.record("judge_partial_fallback",
                                reason="missing_or_non_substantive_summary")
             brief.limitations.append(
@@ -832,6 +880,8 @@ class FullCouncilRunner(CouncilRunner):
             "duplicate_suggestions":self.duplicate_suggestions,
             "stalemates":self.moderator.bus.stalemates(),
             "advisory_findings":advisory_findings,
+            "reference_checks":self.reference_checks,
+            "judge_source":"local_policy" if local_judge else "model",
             "warnings":self.warnings}
         if hasattr(self.events,"db") and hasattr(self.events,"run_id"):
             SQLiteLedger(self.events.db).save(self.events.run_id,self.ledger)

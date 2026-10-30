@@ -13,6 +13,7 @@ import time
 DEFAULT_TTL_SECONDS = 600
 COOLDOWN_SECONDS = {
     "auth": 3600,
+    "billing_required": 86400,
     "model_unavailable": 3600,
     "rate_limit": 60,
     "timeout": 30,
@@ -137,7 +138,8 @@ class HealthCache:
         if kind == "rate_limit" and retry_after is not None:
             delay = max(1, min(86400, float(retry_after)))
         entry = {"until": now + delay, "reason": kind}
-        if kind == "auth":
+        if kind in {"auth", "billing_required"}:
+            # Provider-wide cooldown: never retry an account that needs billing.
             self.data["providers"][provider] = entry
         elif kind == "rate_limit":
             self.data["groups"][self.quota_key(provider, quota_group)] = entry

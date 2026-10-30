@@ -98,6 +98,7 @@ class FamilyTransport:
             else:
                 output_tokens = 2800 if role == "proposal" else 1800
             estimated_tokens=max(1,len(message)//3)+output_tokens
+            retry_after = None
             try:
                 await self.quota.acquire(entry.provider, entry.model,
                     deadline=time.monotonic() + allowed,
@@ -140,7 +141,32 @@ class FamilyTransport:
                         return answer, (captured[-1] if captured else None)
                     finally:
                         RAW_CAPTURE.reset(token)
-                text, raw = await asyncio.wait_for(asyncio.to_thread(infer), timeout=timeout)
+                # Exactly one retry for a *completed* request that reported
+                # timeout. Do not retry asyncio.wait_for thread cancellation:
+                # that HTTP thread could still be running and duplicating a
+                # request would silently consume extra free-tier quota.
+                for attempt_no in range(2):
+                    try:
+                        text, raw = await asyncio.wait_for(
+                            asyncio.to_thread(infer), timeout=timeout)
+                        break
+                    except CandidateError as exc:
+                        if (exc.kind != "timeout" or attempt_no
+                                or budget.allowed(self.timeout, synthesis=synthesis) <= 5):
+                            raise
+                        self.record("model_call_retry",role=role,family=family,
+                                    provider=entry.provider,model=entry.model,
+                                    kind="timeout",attempt=2)
+                        await asyncio.sleep(0.5)
+                        remaining=budget.allowed(self.timeout,synthesis=synthesis)
+                        if remaining <= 4:
+                            raise
+                        # A retry must reserve another request and tokens.
+                        await self.quota.acquire(
+                            entry.provider, entry.model,
+                            deadline=time.monotonic()+remaining,
+                            expected_tokens=estimated_tokens)
+                        timeout=min(remaining, self.timeout)
                 if not text.strip():
                     raise CandidateError("Empty response", kind="invalid_response")
                 elapsed = time.monotonic() - t0
@@ -184,14 +210,18 @@ class FamilyTransport:
                 kind = "timeout"
             except CandidateError as exc:
                 kind = exc.kind
+                retry_after = exc.retry_after
             except (KeyError, TypeError, ValueError):
                 kind = "invalid_response"
             # No underlying exception content, URLs or keys are persisted.
-            self.cache.failure(entry.provider, entry.model, kind)
-            self.quota.failure(entry.provider, entry.model, kind=kind)
+            self.cache.failure(entry.provider, entry.model, kind,
+                               retry_after=retry_after)
+            self.quota.failure(entry.provider, entry.model, kind=kind,
+                               retry_after=retry_after)
             failures.append(entry.provider + "/" + entry.model + ": " + kind)
             self.record("model_call_failed", role=role, family=family,
-                        provider=entry.provider, model=entry.model, kind=kind)
+                        provider=entry.provider, model=entry.model, kind=kind,
+                        retry_after=retry_after)
             if budget.allowed(self.timeout, synthesis=synthesis) <= 1:
                 break
         raise FamilyUnavailable(family, failures)
