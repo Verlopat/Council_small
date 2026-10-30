@@ -98,3 +98,35 @@ def conservative_merge_key(claim: AnchoredClaim) -> tuple:
     """Candidate duplicates only; matching keys do not certify logical equivalence."""
     return (normalize(claim.statement).casefold(), claim.assumptions,
             claim.quantifiers)
+
+def suggest_duplicate_claims(claims, *, threshold: float = 0.85) -> list[dict]:
+    """Review-only semantic-neighborhood hints; never merge different claims.
+
+    Even a score of 1.0 is not logical equivalence. `safe_to_merge` is
+    deliberately limited to exact normalized statements AND equal assumption,
+    quantifier and scope metadata. The caller remains responsible for explicit
+    human or independent semantic review.
+    """
+    from difflib import SequenceMatcher
+    if not 0 <= threshold <= 1:
+        raise ValueError("Similarity threshold out of bounds")
+    rows = list(claims)
+    if len(rows) > 1000:
+        raise ValueError("Too many claims for pairwise comparison")
+    hints = []
+    for i, a in enumerate(rows):
+        for b in rows[i+1:]:
+            left = normalize(a.statement).casefold()
+            right = normalize(b.statement).casefold()
+            score = SequenceMatcher(None, left, right, autojunk=False).ratio()
+            if score < threshold:
+                continue
+            equal_semantic_bounds = (
+                left == right and tuple(a.assumptions) == tuple(b.assumptions)
+                and tuple(a.quantifiers) == tuple(b.quantifiers)
+                and a.scope == b.scope)
+            hints.append({"first_id":a.id,"second_id":b.id,
+                          "similarity":round(score,4),
+                          "metadata_equal":equal_semantic_bounds,
+                          "action":"review_only"})
+    return hints

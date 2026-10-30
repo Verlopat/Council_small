@@ -14,7 +14,7 @@ from council.assignment import Assignment
 from council.dependencies import Dependency
 from council.bus import MessageCap, MessageBus
 from council.evidence import EvidenceRejected
-from council.extract import validate_anchor
+from council.extract import validate_anchor, suggest_duplicate_claims
 from council.judge import blind_ledger, enforce_verdict, judge_failure
 from council.ledger import SQLiteLedger
 from council.models import Claim, ClaimStatus, Evidence, EvidenceKind, ResearchResult, Objection, AuthorResponse
@@ -395,6 +395,13 @@ class FullCouncilRunner(CouncilRunner):
             peer=proposals[(i+1)%len(proposals)]["family"] if len(proposals)>1 else None
             if peer and peer!=p["family"]:
                 await self._extract_rival(p,peer)
+        # Similar wording suggests review candidates, never automatic proof
+        # equivalence or a merge of distinct scope/assumptions.
+        self.duplicate_suggestions = suggest_duplicate_claims(
+            self.ledger.claims.values())
+        if self.duplicate_suggestions:
+            self.events.record("duplicate_claims_suggested",
+                               candidates=self.duplicate_suggestions)
         # Independent peer review is not evidence. Authors may respond, but
         # only the reviewer or a verifier can establish a correction.
         for i,p in enumerate(proposals):
@@ -694,6 +701,7 @@ class FullCouncilRunner(CouncilRunner):
             "evidence":[asdict(e) for e in self.ledger.evidence.values()],
             "verdict":verdict,"composition":asdict(composition),
             "requirements":req.as_data(),"actual_models":self.actual_models,
+            "duplicate_suggestions":self.duplicate_suggestions,
             "warnings":self.warnings}
         if hasattr(self.events,"db") and hasattr(self.events,"run_id"):
             SQLiteLedger(self.events.db).save(self.events.run_id,self.ledger)
