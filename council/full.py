@@ -20,7 +20,7 @@ from council.models import Claim, ClaimStatus, Evidence, EvidenceKind, ResearchR
 from council.moderator import Moderator
 from council.protocol import Message, Act
 from council.parse import item_list, string_list, require_string, OutputError
-from council.translate import plan
+from council.translate import plan, decisive_if_supported
 from council.verify.ladder import verify
 from council.compose import compose_prose
 from council.workflow import CouncilRunner
@@ -113,6 +113,54 @@ class FullCouncilRunner(CouncilRunner):
         if result.outcome not in {"pass","fail"}:
             self.extra_obligations.append(claim.id+": "+result.limitation)
             return
+        # High-stakes means that, in a dry run, this claim is the last
+        # remaining blocker. Check a second non-owner family before relying
+        # on a translated artifact. Agreement is logged but never promoted
+        # into independent formal claim-to-prose correctness.
+        if (result.outcome == "pass" and result.kind != "arithmetic"
+                and decisive_if_supported(self.ledger, claim.id)):
+            second_family = next(
+                (f for f in self.solvers
+                 if f not in {claim.owner_family, self.translator_family,
+                              self.judge_family, self.auditor_family}), None)
+            if second_family and self.budget.debate_remaining() > 3:
+                secondary = await self._call(second_family, "translate", {
+                    "claim_id": claim.id,
+                    "claim_version": claim.version,
+                    "statement": claim.statement,
+                    "source_span": claim.source_span,
+                    "assumptions": claim.assumptions,
+                    "independent_second_translation": True})
+                if secondary:
+                    secondary_artifact = secondary.get("artifact")
+                    if (secondary.get("claim_kind") == kind
+                            and secondary.get("scope") == scope
+                            and isinstance(secondary_artifact, dict)):
+                        secondary_plan = plan(
+                            claim.id, claim.version, kind, scope=scope,
+                            assumptions=tuple(claim.assumptions),
+                            high_stakes=True)
+                        secondary_result = await asyncio.to_thread(
+                            verify, secondary_plan, secondary_artifact)
+                        self.events.record(
+                            "decisive_second_translation", claim_id=claim.id,
+                            first_family=self.translator_family,
+                            second_family=second_family,
+                            first_outcome=result.outcome,
+                            second_outcome=secondary_result.outcome,
+                            matching_scope=True)
+                        if secondary_result.outcome != result.outcome:
+                            self.extra_obligations.append(
+                                claim.id + ": independent translations disagree")
+                    else:
+                        self.extra_obligations.append(
+                            claim.id + ": second translation disagrees on semantics or scope")
+                else:
+                    self.extra_obligations.append(
+                        claim.id + ": second translation unavailable")
+            else:
+                self.extra_obligations.append(
+                    claim.id + ": no independent second translator within budget")
         # A passing equation/source quote is NOT a security theorem proof.
         evidence_kind=(EvidenceKind.SOURCE if result.kind=="quote_exists"
                        else EvidenceKind.FORMAL_PROOF if result.kind=="formal_proof"
