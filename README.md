@@ -248,7 +248,12 @@ python -m council.cli --mode quick --deadline 180 \
 
 The first command explicitly downloads from
 `https://www.rfc-editor.org/rfc/rfc9381.txt` and saves the **complete**
-document to a local git-ignored SQLite index, not to the repository. It can
+document to a local git-ignored SQLite index, not to the repository.
+RFC plain-text page headings can say `Request for Comments: 9381` instead
+of the contiguous string `RFC 9381`; source validation accepts either
+identifier and collapses layout whitespace when checking the title,
+sections and copyright notice. If a required marker is absent, the CLI
+now names that marker instead of reporting a generic incomplete RFC. It can
 also import an already-downloaded official RFC with
 `python -m council.rfc_index --text-file /path/to/rfc9381.txt`.
 The IETF Trust FAQ allows reproduction of complete RFCs; source text is kept
