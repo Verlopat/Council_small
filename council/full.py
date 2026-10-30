@@ -23,7 +23,7 @@ from council.protocol import Message, Act
 from council.parse import item_list, string_list, require_string, OutputError
 from council.translate import plan, decisive_if_supported
 from council.verify.ladder import verify
-from council.compose import compose_prose
+from council.compose import compose_answer
 from council.workflow import CouncilRunner
 from council.requirements import Requirements
 
@@ -643,7 +643,9 @@ class FullCouncilRunner(CouncilRunner):
             self.ledger)
         if isinstance(verdict.get("partial_answer"),str):
             brief.proposed_approach=verdict["partial_answer"]
-        composition=compose_prose([c.id for c in self.ledger.claims.values()],self.ledger)
+        composition=compose_answer(
+            str(verdict.get("answer") or verdict.get("partial_answer") or ""),
+            [c.id for c in self.ledger.claims.values()], self.ledger)
         if composition.blocking:
             brief.limitations.append("Composition contains unverified claims")
             assembled=Claim("composition:1",1,
