@@ -153,7 +153,7 @@ def numbered_sentence_excerpt(answer: str, sentence_ids: list[int]) -> str | Non
         any(type(i) is not int or i < 1 or i > 100 for i in sentence_ids) or
         sentence_ids != list(range(sentence_ids[0], sentence_ids[-1]+1))):
         return None
-    pattern = r"(?m)^\\s*\\[S([1-9][0-9]*)\\]\\s+"
+    pattern = r"(?m)^\s*\[S([1-9][0-9]*)\]\s+"
     tags = list(re.finditer(pattern, answer))
     table = {}
     for position, tag in enumerate(tags):
