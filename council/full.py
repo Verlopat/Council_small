@@ -115,6 +115,7 @@ class FullCouncilRunner(CouncilRunner):
             return
         # A passing equation/source quote is NOT a security theorem proof.
         evidence_kind=(EvidenceKind.SOURCE if result.kind=="quote_exists"
+                       else EvidenceKind.FORMAL_PROOF if result.kind=="formal_proof"
                        else EvidenceKind.TEST)
         independent=(result.kind=="arithmetic" and
                      self._literal_arithmetic_alignment(claim.statement,artifact))
