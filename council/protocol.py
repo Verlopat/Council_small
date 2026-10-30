@@ -1,21 +1,21 @@
-"""Typed claim-thread speech acts. This protocol does not grant models state-write rights."""
+"""Typed debate acts and bounded immutable messages (Architecture v4 §7)."""
 from __future__ import annotations
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 
 class Act(str, Enum):
-    PROPOSE = "PROPOSE"
-    CHALLENGE = "CHALLENGE"
-    REQUEST_EVIDENCE = "REQUEST_EVIDENCE"
-    DEFEND = "DEFEND"
-    CONCEDE = "CONCEDE"
-    WITHDRAW = "WITHDRAW"
-    REPAIR = "REPAIR"
-    ASK = "ASK"
-    ANSWER = "ANSWER"
-    VERIFY_REQUEST = "VERIFY_REQUEST"
-    RESULT = "RESULT"
-    ABSTAIN = "ABSTAIN"
+    PROPOSE="PROPOSE"
+    CHALLENGE="CHALLENGE"
+    REQUEST_EVIDENCE="REQUEST_EVIDENCE"
+    DEFEND="DEFEND"
+    CONCEDE="CONCEDE"
+    WITHDRAW="WITHDRAW"
+    REPAIR="REPAIR"
+    ASK="ASK"
+    ANSWER="ANSWER"
+    VERIFY_REQUEST="VERIFY_REQUEST"
+    RESULT="RESULT"
+    ABSTAIN="ABSTAIN"
 
 @dataclass(frozen=True)
 class Message:
@@ -23,20 +23,16 @@ class Message:
     thread: str
     act: Act
     sender: str
-    sender_family: str
     body: str
     evidence: tuple[str, ...] = ()
-    to: str | None = None
+    recipient: str | None = None
     reply_to: str | None = None
     round: int = 0
-    step_ref: str | None = None
 
     def __post_init__(self):
-        if not self.id or not self.thread or not self.sender or not self.sender_family:
-            raise ValueError("Every act requires an ID, thread, sender, and family")
+        if not self.id or not self.thread or not self.sender:
+            raise ValueError("Message identity, thread and sender required")
+        if len(self.body) > 2400:
+            raise ValueError("Message exceeds conservative 2400-character limit")
         if self.round < 0:
-            raise ValueError("Negative round")
-        if not isinstance(self.act, Act):
-            raise ValueError("Unknown speech act")
-        if len(self.body) > 3200:
-            raise ValueError("Message exceeds approximately 600-token cap")
+            raise ValueError("Invalid round")
