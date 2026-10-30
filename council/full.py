@@ -611,11 +611,16 @@ class FullCouncilRunner(CouncilRunner):
                 continue
             new_text=suggestion["revised_statement"].strip()
             if not new_text or new_text==c.statement:continue
-            try:
-                self.moderator.submit(Message("repair:"+c.id,c.id,Act.REPAIR,
-                                             repairer,repairer,new_text[:2400]))
-            except (EvidenceRejected,MessageCap):
-                continue
+            closed_cause = self.moderator.bus.stalemates().get(c.id)
+            if closed_cause in {"no_evidence_possible", "agents_gave_up"}:
+                if not self.moderator.authorize_repair_from_stalemate(c.id,repairer):
+                    continue
+            else:
+                try:
+                    self.moderator.submit(Message("repair:"+c.id,c.id,Act.REPAIR,
+                                                 repairer,repairer,new_text[:2400]))
+                except (EvidenceRejected,MessageCap):
+                    continue
             # Repair is a NEW proposal linked to its challenged predecessor,
             # not a retroactive modification that erases the disputed statement.
             new_id=c.id+":repair"
