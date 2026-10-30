@@ -80,3 +80,13 @@ These are code-level changes, not declarations of complete experimental proof:
 The full specification contains both *implementable architecture* and
 *external validation conditions*. No safe implementation should claim every
 requirement completed solely because its file or class exists.
+
+
+### Hard-stop API lifecycle (additional implementation)
+
+`council/process_infer.py` adds an opt-in spawn-isolated inference process,
+selected by `COUNCIL_HARD_DEADLINE=1`. A timed-out worker is terminated
+rather than left running as a Python thread. CI checks the selection route
+with mocks; the user host still needs a real network-fault timeout test.
+It does **not** bound catalog-discovery threads, prove sandbox confinement,
+or guarantee provider-side cancellation of a request already accepted.

@@ -167,3 +167,26 @@ model identities, target-machine bubblewrap and formal-tool operation,
 independent proof/claim alignment, fair token-and-tool-budget benchmarking,
 held-out research scoring, interrupted-run recovery, and security testing.
 An offline green CI check cannot certify those external conditions.
+
+
+### Optional hard-deadline inference process
+
+For target Linux deployments that must terminate an in-flight blocking API
+request instead of merely cancelling its awaiting thread, set:
+
+```bash
+COUNCIL_HARD_DEADLINE=1 python -m council.cli --mode full --deadline 600 \
+  "Evaluate a research problem"
+```
+
+This opt-in setting launches a separate Python worker for **inference**
+and terminates it when its bounded deadline expires. It costs process-startup
+overhead and may require local multiprocessing `spawn` permissions. Model
+catalog discovery is still performed by the existing bounded thread wrapper,
+and the parent wall-clock deadline needs target-host fault-injection testing.
+It is an HTTP-liveness mechanism, **not** a sandbox for generated verifier code.
+The verifier sandbox still requires bubblewrap and must fail closed.
+
+All 159 tests (141 package + 18 legacy router) passed offline on the
+2026-10-30 main-branch CI. Live worker termination, live account quotas,
+and formal proof correctness remain external validation gates.
