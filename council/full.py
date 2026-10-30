@@ -658,7 +658,7 @@ class FullCouncilRunner(CouncilRunner):
         brief.unresolved_objections=list(dict.fromkeys(brief.unresolved_objections+
                             list(verdict["blocking"])))
         audit=None
-        if mode!="quick":
+        if mode!="quick" and self.auditor_family is not None:
             audit=await self._call(self.auditor_family,"audit",{"question":question,
                 "requirements":req.as_data(),"blind_verdict":verdict,
                 "research_result":brief.to_dict()},synthesis=True)
@@ -669,7 +669,10 @@ class FullCouncilRunner(CouncilRunner):
                 brief.proposed_experiments=list(dict.fromkeys(
                      brief.proposed_experiments+string_list(audit,"suggested_checks")))
             except OutputError:self.warnings.append("Audit output malformed")
-        elif mode!="quick": brief.limitations.append("Independent auditor unavailable")
+        elif mode!="quick":
+            brief.limitations.append(
+                "Independent auditor not assigned" if self.auditor_family is None
+                else "Independent auditor unavailable")
         brief.completion_status=("partial" if proposals else "unresolved")
         brief.limitations=list(dict.fromkeys(brief.limitations+self.warnings))
         result={"research_result":brief.to_dict(),"proposals":proposals,

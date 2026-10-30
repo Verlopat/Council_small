@@ -11,7 +11,7 @@ class CouncilConfig:
     solvers:tuple[str,...]
     translator:str
     judge:str
-    auditor:str
+    auditor:str|None
     max_claims:int
     hunter_cap:int
     per_call_timeout:float
@@ -38,7 +38,8 @@ def load_config(path:Path)->CouncilConfig:
                       for x in data.get("solvers",[])),
         translator=str(data.get("translator","glm")),
         judge=str(data.get("judge","gemini")),
-        auditor=str(data.get("auditor","gemma")),
+        auditor=(str(data.get("auditor"))
+                 if data.get("auditor", "gemma") is not None else None),
         max_claims=int(data.get("max_claims",12)),
         hunter_cap=int(data.get("hunter_cap",4)),
         per_call_timeout=float(data.get("per_call_timeout",28)),
