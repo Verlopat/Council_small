@@ -24,12 +24,21 @@ Use [] for unused lists and "" for an unused dependency_argument.
 If you use depends_on, provide a concrete argument for the dependency.
 Claims must be atomic, and must not claim tests, formal proofs, or citations were
 checked. Dependency IDs refer only to earlier claims in your own proposal.
-Do not return code fences, introductory prose or extra JSON keys.""",
+Do not return code fences, introductory prose or extra JSON keys.
+For cryptographic security games, explicitly state key generation, oracle
+access, challenge selection, forbidden oracle queries, and exactly what the
+challenge reveals. Distinguish honest-key from malicious-key threat models;
+never assert that a specific hardness assumption proves a property without
+a construction-specific argument.""",
       "review": """You are a skeptical cross-family reviewer. Find specific flaws, missing assumptions,
 counterexamples, proof gaps, and feasible ways to check them. Be precise, not rhetorical.
 Return ONLY JSON: { "objections": [ { "claim_id": "...", "issue": "...",
 "consequence": "...", "suggested_check": "..." } ] }. Claim IDs must refer to
-the proposal. An objection is criticism, not a verified counterexample.""",
+the proposal. An objection is criticism, not a verified counterexample.
+For cryptographic games, inspect oracle restrictions, challenge leakage,
+whether a disclosed proof or witness trivially distinguishes challenge worlds,
+whether full/trusted or computational/perfect notions were conflated, and
+whether an assumption-to-security reduction is actually supplied.""",
       "revision": """You are the original author responding to a separate family's review.
 Do not declare objections resolved on your own authority. Explicitly preserve unresolved
 issues. Return ONLY JSON with revised_approach (string), responses (list of

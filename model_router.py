@@ -257,6 +257,16 @@ class Router:
             generation = {'maxOutputTokens': 192 if probe else (max_output_tokens or 700)}
             if model == 'gemini-3.8-flash':
                 generation['thinkingConfig'] = {'thinkingLevel': 'LOW'}
+            if response_format is not None:
+                if (probe or not isinstance(response_format, dict)
+                        or response_format.get('type') != 'gemini_response_schema'
+                        or not isinstance(response_format.get('schema'), dict)):
+                    raise CandidateError('Unsupported Gemini output format',
+                                         kind='request_invalid')
+                # generateContent REST: JSON MIME type and OpenAPI-style
+                # responseSchema belong in generationConfig.
+                generation['responseMimeType'] = 'application/json'
+                generation['responseSchema'] = response_format['schema']
             payload = {'contents': [{'parts': [{'text': prompt}]}],
                        'generationConfig': generation}
             if system_text:
@@ -267,8 +277,13 @@ class Router:
             if not choices or not isinstance(choices[0], dict):
                 raise CandidateError('No Gemini candidates')
             entry = choices[0]
-            if entry.get('finishReason') in ('MAX_TOKENS', 'SAFETY', 'RECITATION', 'BLOCKLIST', 'PROHIBITED_CONTENT'):
-                raise CandidateError('Generation stopped before completion')
+            finish_reason = entry.get('finishReason')
+            if finish_reason == 'MAX_TOKENS':
+                raise CandidateError('Gemini response truncated by output allowance',
+                                     kind='output_truncated')
+            if finish_reason in ('SAFETY', 'RECITATION', 'BLOCKLIST', 'PROHIBITED_CONTENT'):
+                raise CandidateError('Gemini generation stopped by a content filter',
+                                     kind='content_filtered')
             parts = (entry.get('content') or {}).get('parts', [])
             raw = '\n'.join(p['text'] for p in parts
                             if isinstance(p, dict) and isinstance(p.get('text'), str))

@@ -133,3 +133,27 @@ not as reviewer objections. Unverified composed prose remains a blocking
 item until appropriately scoped evidence exists. No new cryptographic
 security theorem is certified simply because a citation or exact quote
 was found.
+
+## Gemini judge JSON, reviewer depth and obligation reporting
+
+For the `gemini` judge family, the `generateContent` request now sets
+`generationConfig.responseMimeType="application/json"` and supplies a
+judge-specific `responseSchema`. This is a supported legacy
+`generateContent` option but is not an assurance that every provider/model
+version will return compliant output. Local Pydantic validation remains the
+hard boundary. The judgment receives **one** bounded formatting retry after
+a successful provider response that cannot be parsed/validated; transport,
+quota and deadline failures are not automatically retried.
+
+The user-visible `Run status: partial` means a useful research draft exists,
+not that its security claims are verified. The CLI now separately reports the
+blind judge verdict and its error cause (if any). Multiple proof obligations
+for the same claim ID appear on one row while retaining distinct issues.
+A missing challenge proof, a full-vs-trusted uniqueness distinction, and a
+claimed hardness reduction are **semantic review questions**: formatting
+constraints and literal provenance alone cannot establish their correctness.
+
+For formal cryptography, use `--mode full` and enough verified free
+provider quota for independent reviewers, translation and auditing.
+`--mode quick` skips independent critics, so "(none)" under reviewer
+objections must not be read as a security endorsement.

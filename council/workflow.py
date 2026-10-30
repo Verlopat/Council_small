@@ -39,28 +39,35 @@ class CouncilRunner:
             return None
 
         original_message = prompt(role, data)
-        # Proposals are the only stage eligible for one format retry. The
-        # original task and role remain unchanged; never feed untrusted output
-        # back to the model as instructions or bypass schema validation.
-        for attempt in range(2 if role == "proposal" else 1):
+        # Only proposals and judges get one bounded format retry. Retry
+        # modifies formatting instructions, not the task, ledger or raw answer.
+        # Never feed rejected model text back as privileged instructions.
+        for attempt in range(2 if role in {"proposal", "judge"} else 1):
             if attempt:
                 separator = "\nDATA_JSON:\n"
                 if separator not in original_message:
                     self.warnings.append(role + "/" + family +
                                          ": format retry unavailable")
                     return None
+                if role == "proposal":
+                    formatting = (
+                        "Output ONE complete JSON object with nonempty approach, "
+                        "at least one anchored claim, hypotheses and experiments. "
+                        "Every claim needs id, statement, source_span, assumptions, "
+                        "limitations, depends_on and dependency_argument. "
+                        "Source spans must be exact quotes from the approach. ")
+                else:
+                    formatting = (
+                        "Output ONE complete JSON object for the blind judge. "
+                        "Required: status equal to 'answer' or 'unresolved'. "
+                        "Optional: answer, partial_answer (strings), blocking "
+                        "and basis (arrays of strings). "
+                        "Do not promote unsupported claims to established facts. ")
                 message = original_message.replace(
-                    separator,
-                    "\nFORMAT RETRY: Previous generation did not satisfy the JSON "
-                    "proposal contract. Output ONE complete JSON object with "
-                    "nonempty approach and at least one anchored claim. "
-                    "Required claim keys: id, statement, source_span, "
-                    "assumptions, limitations, depends_on, dependency_argument. "
-                    "Also include hypotheses and experiments lists. "
-                    "Source spans must be exact quotations from approach. "
-                    "Do not add markdown or invented verification.\n" +
-                    separator,
-                    1)
+                    separator, "\nFORMAT RETRY: Previous generation did not "
+                    "satisfy this role's JSON contract. " + formatting +
+                    "No markdown, commentary, or fabricated evidence.\n" +
+                    separator, 1)
             else:
                 message = original_message
             try:
@@ -85,7 +92,7 @@ class CouncilRunner:
                 self.events.record("role_parse_error", role=role, family=family,
                                    provider=response.provider, model=response.model,
                                    reason=reason, attempt=attempt + 1)
-                if (role == "proposal" and attempt == 0 and
+                if (role in {"proposal", "judge"} and attempt == 0 and
                         self.budget.allowed(30, synthesis=synthesis) > 2):
                     self.events.record("format_retry_requested",
                                        role=role, family=family,

@@ -18,6 +18,7 @@ from council.extract import validate_anchor, suggest_duplicate_claims
 from council.judge import blind_ledger, enforce_verdict, judge_failure
 from council.ledger import SQLiteLedger
 from council.models import Claim, ClaimStatus, Evidence, EvidenceKind, ResearchResult, Objection, AuthorResponse
+from council.obligations import group_by_claim_id
 from council.moderator import Moderator
 from council.protocol import Message, Act
 from council.parse import item_list, string_list, require_string, OutputError
@@ -704,10 +705,10 @@ class FullCouncilRunner(CouncilRunner):
         brief.proposed_approach=" | ".join(p["approach"] for p in proposals)
         open_claims=[c for c in self.ledger.claims.values()
                      if c.status in {ClaimStatus.PROPOSED,ClaimStatus.UNRESOLVED}]
-        brief.proof_obligations=list(dict.fromkeys(
+        brief.proof_obligations=group_by_claim_id(
             self.extra_obligations+
             [c.id+": "+c.statement+" (not independently established)"
-             for c in open_claims]))
+             for c in open_claims], self.ledger.claims)
         # Unverified claims are obligations, not actual reviewer objections.
         brief.unresolved_objections=list(dict.fromkeys(
             self.coverage+
@@ -729,10 +730,9 @@ class FullCouncilRunner(CouncilRunner):
             "question_requirements":req.as_data(),
             "argument_map":[{"claim_id":x["claim_id"],"evidence_id":x["evidence_id"]}
                             for x in self.verified]}
+        # _call already performs at most one schema/format retry for a judge.
+        # Avoid a second independent call that would silently spend more quota.
         candidate=await self._call(self.judge_family,"judge",judge_payload,synthesis=True)
-        if candidate is None and self.budget.remaining()>3:
-            candidate=await self._call(self.judge_family,"judge",
-                dict(judge_payload,retry_seed=1),synthesis=True)
         verdict=enforce_verdict(candidate or {"status":"unresolved",
             "partial_answer":brief.proposed_approach,"cause":"judge_error"},
             self.ledger)
@@ -750,16 +750,20 @@ class FullCouncilRunner(CouncilRunner):
             self.ledger.add_claim(assembled)
             self.events.record("composition_failed",claim_id=assembled.id,
                                blocking=list(composition.blocking),rung="prose")
+            prior_cause=verdict.get("cause")
+            cause=(prior_cause if prior_cause in
+                   {"judge_error","deadline","quota_contention"}
+                   else "composition_failure")
             verdict=enforce_verdict(dict(verdict,status="unresolved",
-                cause="composition_failure"),self.ledger)
-            verdict["cause"]="composition_failure"
+                cause=cause),self.ledger)
+            if cause!="composition_failure":
+                verdict["additional_causes"]=["composition_failure"]
         # Keep all judge blockers visible, but do not relabel them as
         # objections raised by a reviewer. The blocking IDs are in verdict.
-        brief.proof_obligations=list(dict.fromkeys(
+        brief.proof_obligations=group_by_claim_id(
             brief.proof_obligations+
             [cid+": independent verification required"
-             for cid in verdict["blocking"]
-             if not any(item.startswith(cid+":") for item in brief.proof_obligations)]))
+             for cid in verdict["blocking"]], self.ledger.claims)
         audit=None
         if mode!="quick" and self.auditor_family is not None:
             audit=await self._call(self.auditor_family,"audit",{"question":question,

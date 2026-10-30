@@ -1,8 +1,8 @@
-"""Provider-specific formatting hints, never a substitute for local validation.
+"""Provider-specific structured-output hints, never verification evidence.
 
-Groq GPT-OSS 20B/120B supports strict JSON Schema structured outputs.
-All fields in the strict schema are required and every object is closed;
-semantic anchors and claim/evidence rules are still checked separately.
+Groq GPT-OSS supports JSON Schema requests. Gemini's generateContent API
+supports responseMimeType and responseSchema under generationConfig.
+Local schema and evidence checks always remain authoritative.
 """
 from __future__ import annotations
 
@@ -37,7 +37,30 @@ PROPOSAL_SCHEMA = {
     "additionalProperties": False,
 }
 
+# Gemini's generateContent schema uses OpenAPI-style type names; make
+# optional text fields genuinely optional instead of requiring model-authored
+# nulls. The local Pydantic judge contract still rejects invalid content.
+GEMINI_JUDGE_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "status": {"type": "STRING", "enum": ["answer", "unresolved"]},
+        "answer": {"type": "STRING"},
+        "partial_answer": {"type": "STRING"},
+        "blocking": {"type": "ARRAY", "items": {"type": "STRING"}},
+        "basis": {"type": "ARRAY", "items": {"type": "STRING"}},
+    },
+    "required": ["status"],
+    "propertyOrdering": [
+        "status", "answer", "partial_answer", "blocking", "basis"
+    ],
+}
+
 def response_format(provider: str, model: str, role: str) -> dict | None:
+    if provider == "Gemini":
+        if role == "judge":
+            return {"type": "gemini_response_schema",
+                    "schema": GEMINI_JUDGE_SCHEMA}
+        return None
     if provider != "Groq" or not model.startswith("openai/gpt-oss-"):
         return None
     if role == "proposal":
