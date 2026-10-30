@@ -106,6 +106,12 @@ class FamilyTransport:
                             provider=entry.provider, model=entry.model,
                             prompt_hash=hashlib.sha256(message.encode()).hexdigest())
                 def infer():
+                    if os.getenv("COUNCIL_HARD_DEADLINE", "0") == "1":
+                        from council.process_infer import generate as generate_process
+                        return generate_process(
+                            entry.provider, entry.model, user_text,
+                            system_text=system_text, timeout=timeout,
+                            max_tokens=1800)
                     captured = []
                     token = RAW_CAPTURE.set(captured)
                     try:
