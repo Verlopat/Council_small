@@ -236,24 +236,47 @@ class FullCouncilRunner(CouncilRunner):
             self.events.record("rival_claim_extracted",claim_id=cid,
                                reviewer_family=other_family,source_span=span)
 
-    async def _hunt(self,claim:Claim,hunter_family:str,round_number:int):
-        if hunter_family==claim.owner_family or hunter_family==self.judge_family:return
-        result=await self._call(hunter_family,"hunter",{
-            "claim":claim.statement,"assumptions":claim.assumptions,
-            "scope":claim.scope,"claim_id":claim.id})
-        if not result:return
-        if not result.get("found"):return
-        detail=result.get("counterexample")
-        if not isinstance(detail,str) or not detail.strip():return
-        message=Message("h"+str(len(self.moderator.bus.threads)+1)+":"+claim.id,
-                        claim.id,Act.CHALLENGE,hunter_family,hunter_family,
-                        detail[:2400],step_ref=detail[:300],round=round_number)
-        try:
-            self.moderator.submit(message)
-            self.events.record("hunter_objection",claim_id=claim.id,
-                               hunter_family=hunter_family,issue=detail)
-        except (EvidenceRejected,MessageCap):
-            self.warnings.append("Hunter cap or evidence policy rejected "+claim.id)
+    async def _hunt_batch(self, jobs: list[tuple[Claim, str, int]]) -> None:
+        """Run independent hunter inference concurrently, commit messages in stable order.
+
+        The event-loop receives model proposals in parallel, but a *single*
+        coordinator processes their effects on the claim ledger and bus. A model
+        returning earlier must not gain a scheduling or truth advantage.
+        """
+        admissible = [(claim, family, round_number)
+                      for claim, family, round_number in jobs
+                      if family != claim.owner_family and
+                      family not in {self.judge_family, self.auditor_family}
+                      and self.budget.debate_remaining() > 1]
+        if not admissible:
+            return
+        results = await asyncio.gather(*[
+            self._call(family, "hunter", {
+                "claim": claim.statement, "assumptions": claim.assumptions,
+                "scope": claim.scope, "claim_id": claim.id})
+            for claim, family, _ in admissible
+        ])
+        for (claim, hunter_family, round_number), result in zip(admissible, results):
+            if not result or not result.get("found"):
+                continue
+            detail = result.get("counterexample")
+            if not isinstance(detail, str) or not detail.strip():
+                continue
+            message = Message("h" + str(len(self.moderator.bus.threads) + 1) +
+                              ":" + claim.id, claim.id, Act.CHALLENGE,
+                              hunter_family, hunter_family, detail[:2400],
+                              step_ref=detail[:300], round=round_number)
+            try:
+                accepted = self.moderator.submit(message)
+                if accepted == "accepted":
+                    self.events.record("hunter_objection", claim_id=claim.id,
+                                       hunter_family=hunter_family, issue=detail,
+                                       round=round_number)
+            except (EvidenceRejected, MessageCap):
+                self.warnings.append("Hunter cap or evidence policy rejected " + claim.id)
+
+    async def _hunt(self, claim: Claim, hunter_family: str, round_number: int) -> None:
+        await self._hunt_batch([(claim, hunter_family, round_number)])
 
     async def run(self,question:str,*,mode:str="full")->dict:
         if not isinstance(question,str) or not question.strip():
@@ -440,11 +463,14 @@ class FullCouncilRunner(CouncilRunner):
                          for cid in self.moderator.priority_order()
                          if self.ledger.claims[cid].status in
                          {ClaimStatus.PROPOSED,ClaimStatus.UNRESOLVED}]
+            jobs = [(claim, hunter, self.moderator.current_round)
+                    for claim in open_claims[:self.hunter_cap]
+                    if (hunter := next((f for f in self.solvers
+                                        if f != claim.owner_family), None))]
+            await self._hunt_batch(jobs)
             for claim in open_claims[:self.hunter_cap]:
-                if self.budget.debate_remaining()<1:break
-                hunter=next((f for f in self.solvers if f!=claim.owner_family),None)
-                if hunter:
-                    await self._hunt(claim,hunter,self.moderator.current_round)
+                if self.budget.debate_remaining() < 1:
+                    break
                 for critic in self.critics:
                     if critic in {claim.owner_family,self.judge_family,
                                   self.auditor_family} or self.budget.debate_remaining()<1:
@@ -513,14 +539,11 @@ class FullCouncilRunner(CouncilRunner):
                          for cid in self.moderator.priority_order()
                          if self.ledger.claims[cid].status in
                          {ClaimStatus.PROPOSED, ClaimStatus.UNRESOLVED}]
-            for claim in remaining[:self.hunter_cap]:
-                if self.budget.debate_remaining() <= 1:
-                    break
-                hunter = next((f for f in self.solvers
-                               if f != claim.owner_family), None)
-                if hunter:
-                    await self._hunt(claim, hunter,
-                                     self.moderator.current_round)
+            jobs = [(claim, hunter, self.moderator.current_round)
+                    for claim in remaining[:self.hunter_cap]
+                    if (hunter := next((f for f in self.solvers
+                                        if f != claim.owner_family), None))]
+            await self._hunt_batch(jobs)
         brief=ResearchResult(research_question=question,
                              completion_status="partial")
         brief.hypotheses=list(dict.fromkeys(h for p in proposals for h in p["hypotheses"]))
