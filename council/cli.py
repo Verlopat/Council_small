@@ -22,6 +22,8 @@ def main(argv=None) -> int:
     parser.add_argument("--timeout", type=float, default=28.0,
                         help="Per inference request timeout")
     parser.add_argument("--config", type=Path, default=Path("council.yaml"))
+    parser.add_argument("--paper-index", type=Path,
+                        help="Existing SQLite paper index for scoped, non-certifying quote retrieval")
     parser.add_argument("--requirements-file", type=Path,
                         help="JSON document with objective, constraints and questions")
     parser.add_argument("--run-dir", type=Path, default=Path("runs"))
@@ -39,6 +41,8 @@ def main(argv=None) -> int:
                         help="Show all configured provider lineages and local free-key eligibility without API calls")
     parser.add_argument("--json", action="store_true", help="Print complete JSON results")
     args = parser.parse_args(argv)
+    if args.paper_index is not None and not args.paper_index.is_file():
+        parser.error("--paper-index must identify an existing SQLite corpus")
     if args.list_families:
         for name, family in FAMILIES.items():
             print(name + ": " + ", ".join(e.provider + "/" + e.model for e in family.endpoints))
@@ -81,6 +85,7 @@ def main(argv=None) -> int:
         if metadata is None:
             parser.error("Checkpoint has no start metadata")
         from council.replay import ReplayTransport, ResumeTransport
+        from council.verify.source import PaperIndex
         mode = metadata.get("mode", "research")
         question = metadata.get("question", "")
         with EventStore(args.run_dir, original_id +
@@ -112,7 +117,9 @@ def main(argv=None) -> int:
                     translator_family=allocation.get("translator","glm"),
                     judge_family=allocation.get("judge","gemini"),
                     auditor_family=allocation.get("auditor","gemma"),
-                    caps=metadata.get("debate_caps",{}))
+                    caps=metadata.get("debate_caps",{}),
+                    paper_index=(PaperIndex(args.paper_index)
+                                 if args.paper_index else None))
             else:
                 runner=CouncilRunner(transport,destination,budget)
             result=asyncio.run(runner.run(question,mode=mode))
@@ -141,6 +148,10 @@ def main(argv=None) -> int:
                             (AUDITOR if args.mode == "research" else None),
                           "deadline": args.deadline, "api_calls": 0}, indent=2))
         return 0
+    paper_index=None
+    if args.paper_index:
+        from council.verify.source import PaperIndex
+        paper_index=PaperIndex(args.paper_index)
     run_id = args.run_id or uuid.uuid4().hex[:16]
     budget = RunBudget.start(args.deadline, reserve=min(20.0, args.deadline / 3))
     with EventStore(args.run_dir, run_id) as events:
@@ -173,7 +184,7 @@ def main(argv=None) -> int:
                 critics=(tuple(cfg.optional.get("critics",[])) if cfg else ()),
                 adaptive_seeds=(cfg.optional.get("adaptive_seeds",False) if cfg else False),
                 enable_repairs=(cfg.optional.get("repair_round",True) if cfg else True),
-                caps=(cfg.caps if cfg else {}))
+                caps=(cfg.caps if cfg else {}), paper_index=paper_index)
         elif args.mode == "quick":
             from council.full import QuickCouncilRunner
             from council.requirements import Requirements
@@ -182,7 +193,11 @@ def main(argv=None) -> int:
             runner=QuickCouncilRunner(transport,events,budget,requirements=req)
         else:
             runner = CouncilRunner(transport, events, budget)
-        result = asyncio.run(runner.run(question, mode=args.mode))
+        try:
+            result = asyncio.run(runner.run(question, mode=args.mode))
+        finally:
+            if paper_index is not None:
+                paper_index.close()
     if args.json:
         print(json.dumps(result, ensure_ascii=False, indent=2))
     else:

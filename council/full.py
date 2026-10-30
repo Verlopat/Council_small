@@ -41,7 +41,7 @@ class FullCouncilRunner(CouncilRunner):
                  translator_family=TRANSLATOR,judge_family=JUDGE,
                  auditor_family=AUDITOR,enable_coverage=True,
                  enable_relevance=False,critics=(),adaptive_seeds=False,
-                 enable_repairs=True, caps=None):
+                 enable_repairs=True, caps=None, paper_index=None):
         super().__init__(transport,events,budget,solvers=tuple(solvers))
         self.assignment=Assignment(tuple(solvers),translator=translator_family,
                                    judge=judge_family,auditor=auditor_family)
@@ -71,6 +71,8 @@ class FullCouncilRunner(CouncilRunner):
         self.critics=tuple(critics)
         self.adaptive_seeds=bool(adaptive_seeds)
         self.enable_repairs=bool(enable_repairs)
+        self.paper_index=paper_index
+        self.checked_sources=set()
         self.extra_obligations=[]
         self.objections=[]
         self.author_responses=[]
@@ -167,7 +169,8 @@ class FullCouncilRunner(CouncilRunner):
         try:
             check_plan=plan(claim.id,claim.version,kind,scope=scope,
                             assumptions=tuple(claim.assumptions))
-            result=await asyncio.to_thread(verify,check_plan,artifact)
+            result=await asyncio.to_thread(
+                verify, check_plan, artifact, paper_index=self.paper_index)
         except (ValueError,TypeError,KeyError):
             self.warnings.append("Checker plan rejected for "+claim.id)
             return
@@ -235,6 +238,13 @@ class FullCouncilRunner(CouncilRunner):
                      self._literal_arithmetic_alignment(claim.statement,artifact))
         if evidence_kind is EvidenceKind.SOURCE:
             independent=False
+            document_id=artifact.get("document_id")
+            if isinstance(document_id,str) and document_id.strip():
+                self.checked_sources.add(document_id)
+                self.events.record(
+                    "source_passage_checked", claim_id=claim.id,
+                    document_id=document_id, artifact_hash=result.artifact_hash,
+                    semantic_entailment="unchecked")
             if self.enable_relevance and self.budget.debate_remaining()>3:
                 reviewer=next((f for f in self.solvers if f!=claim.owner_family),None)
                 if reviewer:
@@ -618,7 +628,7 @@ class FullCouncilRunner(CouncilRunner):
         brief.proposed_experiments=list(dict.fromkeys(x for p in proposals for x in p["experiments"]))
         brief.supported_findings=[c.statement for c in self.ledger.claims.values()
                                   if c.status is ClaimStatus.SUPPORTED]
-        brief.checked_source_ids=[]
+        brief.checked_source_ids=sorted(self.checked_sources)
         brief.proposed_approach=" | ".join(p["approach"] for p in proposals)
         brief.proof_obligations=list(dict.fromkeys(self.extra_obligations))
         brief.unresolved_objections=list(dict.fromkeys(self.coverage+
