@@ -12,7 +12,7 @@ import time
 
 from council.assignment import Assignment
 from council.dependencies import Dependency
-from council.bus import MessageCap
+from council.bus import MessageCap, MessageBus
 from council.evidence import EvidenceRejected
 from council.extract import validate_anchor
 from council.judge import blind_ledger, enforce_verdict, judge_failure
@@ -41,7 +41,7 @@ class FullCouncilRunner(CouncilRunner):
                  translator_family=TRANSLATOR,judge_family=JUDGE,
                  auditor_family=AUDITOR,enable_coverage=True,
                  enable_relevance=False,critics=(),adaptive_seeds=False,
-                 enable_repairs=True):
+                 enable_repairs=True, caps=None):
         super().__init__(transport,events,budget,solvers=tuple(solvers))
         self.assignment=Assignment(tuple(solvers),translator=translator_family,
                                    judge=judge_family,auditor=auditor_family)
@@ -49,7 +49,19 @@ class FullCouncilRunner(CouncilRunner):
         self.judge_family=judge_family
         self.auditor_family=auditor_family
         self.requirements=requirements
-        self.moderator=Moderator(self.ledger,events=events.record)
+        defaults = {"messages": 5, "verifier_calls": 2,
+                    "repairs": 1, "pair_exchanges": 3}
+        self.caps = dict(defaults)
+        self.caps.update(caps or {})
+        if set(self.caps) != set(defaults) or any(
+                type(n) is not int or n < 1 or n > 20
+                for n in self.caps.values()):
+            raise ValueError("Invalid debate caps")
+        bus = MessageBus(message_cap=self.caps["messages"],
+                         verifier_cap=self.caps["verifier_calls"],
+                         repair_cap=self.caps["repairs"],
+                         pair_cap=self.caps["pair_exchanges"])
+        self.moderator=Moderator(self.ledger,bus=bus,events=events.record)
         self.max_claims=max_claims
         self.hunter_cap=hunter_cap
         self.coverage=[]
@@ -339,6 +351,7 @@ class FullCouncilRunner(CouncilRunner):
         self.events.record("run_started",question=question,mode=mode,
             pipeline="evidence",
             requirements=req.as_data(),role_assignment=asdict(self.assignment),
+            debate_caps=self.caps,
             deadline_remaining=self.budget.remaining())
         proposals=[]
         raw=await asyncio.gather(*[

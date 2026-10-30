@@ -111,7 +111,8 @@ def main(argv=None) -> int:
                     solvers=tuple(allocation.get("solvers",("gpt-oss","command","nemotron"))),
                     translator_family=allocation.get("translator","glm"),
                     judge_family=allocation.get("judge","gemini"),
-                    auditor_family=allocation.get("auditor","gemma"))
+                    auditor_family=allocation.get("auditor","gemma"),
+                    caps=metadata.get("debate_caps",{}))
             else:
                 runner=CouncilRunner(transport,destination,budget)
             result=asyncio.run(runner.run(question,mode=mode))
@@ -171,7 +172,8 @@ def main(argv=None) -> int:
                 enable_relevance=(cfg.optional.get("relevance_check",False) if cfg else False),
                 critics=(tuple(cfg.optional.get("critics",[])) if cfg else ()),
                 adaptive_seeds=(cfg.optional.get("adaptive_seeds",False) if cfg else False),
-                enable_repairs=(cfg.optional.get("repair_round",True) if cfg else True))
+                enable_repairs=(cfg.optional.get("repair_round",True) if cfg else True),
+                caps=(cfg.caps if cfg else {}))
         elif args.mode == "quick":
             from council.full import QuickCouncilRunner
             from council.requirements import Requirements
