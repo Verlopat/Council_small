@@ -67,6 +67,25 @@ class Moderator:
                     sender=self.bus.handle(msg.sender), status=claim.status.value)
         return result
 
+    def authorize_repair_from_stalemate(self, claim_id: str, family: str) -> bool:
+        """Authorize a single new claim proposal after an evidenceless stalemate.
+
+        The prior thread remains closed. The new claim must be independently
+        verified at P2. The moderator retains authority over repair caps.
+        """
+        claim = self.ledger.claims.get(claim_id)
+        thread = self.bus.threads.get(claim_id)
+        if claim is None or thread is None:
+            return False
+        if thread.close_cause not in {"no_evidence_possible", "agents_gave_up"}:
+            return False
+        if family == claim.owner_family or thread.repairs >= self.bus.repair_cap:
+            return False
+        thread.repairs += 1
+        self.events("repair_from_stalemate", claim_id=claim_id,
+                    cause=thread.close_cause, proposer_family=family)
+        return True
+
     def begin_next_round(self) -> bool:
         if self.current_round and self.new_evidence == 0:
             return False
