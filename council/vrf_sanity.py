@@ -56,6 +56,56 @@ def scan_vrf_games(question: str, claims) -> list[dict]:
                                "oracle responses rather than only the "
                                "fresh challenge output; inspect oracle rules.",
                 })
+        if PSEUDO.search(text) and re.search(r"\bgame\b",text,re.I):
+            if (re.search(r"\bPRF\s+(?:output\s+)?distribution\b",text,re.I)
+                    and not re.search(r"\buniform(?:ly)?\s+random\b",text,re.I)):
+                findings.append({
+                    "claim_id":cid,"kind":"pseudorandomness_wrong_ideal_distribution",
+                    "message":"The ideal VRF pseudorandomness challenge is uniform "
+                              "over the output space, not sampled from a PRF "
+                              "distribution. Review the exact game.",
+                    "reference":"RFC 9381 Section 3.4"})
+            if not re.search(r"\bevaluation\s+oracle\b|\boracle\b|"
+                             r"\bquer(?:y|ies)\b.{0,100}\bproof\b|"
+                             r"\bproof\b.{0,100}\bother\s+inputs?\b",text,re.I):
+                findings.append({
+                    "claim_id":cid,"kind":"pseudorandomness_oracle_unspecified",
+                    "message":"No evaluation oracle giving real output-proof "
+                              "pairs for other inputs appears in this claim. "
+                              "Check the complete game.",
+                    "reference":"RFC 9381 Section 3.4"})
+            if not re.search(r"\bunqueried\b|\bfresh\b|"
+                             r"\b(?:not|never)\s+quer(?:y|ied)\b|"
+                             r"\bforbid.{0,45}quer|\bother\s+inputs?\b|"
+                             r"\bexcept\s+(?:the\s+)?challeng",text,re.I):
+                findings.append({
+                    "claim_id":cid,"kind":"pseudorandomness_freshness_unspecified",
+                    "message":"Challenge-input freshness and the prohibition "
+                              "on asking its evaluation/proof oracle are not "
+                              "specified in this claim.",
+                    "reference":"RFC 9381 Section 3.4"})
+        if FULL.search(text) and re.search(r"\bgame\b",text,re.I):
+            if not re.search(r"adversar(?:y|ial).{0,85}"
+                             r"(?:choos|select|generat|suppl).{0,50}"
+                             r"(?:key|PK|public)\b|"
+                             r"(?:PK|public\s+key).{0,40}chosen\s+by\s+"
+                             r"(?:the\s+)?adversary",text,re.I):
+                findings.append({
+                    "claim_id":cid,"kind":"full_uniqueness_key_choice_unspecified",
+                    "message":"Full uniqueness includes adversarially chosen "
+                              "public keys, which are not explicitly covered "
+                              "by this claim. Check the full game.",
+                    "reference":"RFC 9381 Section 3.1"})
+            if (re.search(r"\by\s*(?:\^\s*)?\*|\by\s*_\s*\*",text,re.I)
+                    and not re.search(r"\b(?:two|both)\b.{0,70}\b(?:proof|"
+                                      r"valid|output)\b|π1|pi1|pi_1",text,re.I)):
+                findings.append({
+                    "claim_id":cid,"kind":"full_uniqueness_challenger_reference",
+                    "message":"A reference output y* and one alternative do "
+                              "not specify the full uniqueness win condition: "
+                              "two different accepting outputs for one input "
+                              "and adversarially selected public key.",
+                    "reference":"RFC 9381 Section 3.1"})
         if FULL.search(text):
             if (re.search(r"challenger.{0,110}(?:key\s*gen(?:eration)?|"
                           r"keygen|generates?\s+(?:a\s+)?key\s*pair)", text, re.I)
@@ -70,6 +120,24 @@ def scan_vrf_games(question: str, claims) -> list[dict]:
                                "challenger key generation is the trusted-key "
                                "variant. Review key-generation quantifiers.",
                 })
+        if TRUSTED.search(text) and re.search(r"\bgame\b",text,re.I):
+            if not re.search(r"\bhonest(?:ly)?\b|\bkeygen\b|"
+                             r"\bkey\s+gen(?:eration)?\b|"
+                             r"\bproper(?:ly)?\s+generated\b",text,re.I):
+                findings.append({
+                    "claim_id":cid,"kind":"trusted_uniqueness_key_origin_unspecified",
+                    "message":"Trusted uniqueness presumes honestly "
+                              "generated keys, even if the adversary knows "
+                              "the secret key. The assumption is missing here.",
+                    "reference":"RFC 9381 Section 3.3"})
+            if re.search(r"\bsame\s+(?:win\s+)?condition\s+as\b|"
+                         r"\bsame\s+as\s+(?:the\s+)?full\b",text,re.I):
+                findings.append({
+                    "claim_id":cid,"kind":"trusted_uniqueness_inherited_game",
+                    "message":"This claim references another game's win "
+                              "condition without independently specifying "
+                              "two different accepting outputs for one input.",
+                    "reference":"RFC 9381 Section 3.3"})
         if TRUSTED.search(text) and re.search(r"trapdoor\s+oracle", text, re.I):
             findings.append({
                 "claim_id": cid,

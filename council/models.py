@@ -97,6 +97,7 @@ class AuthorResponse:
 class ResearchResult:
     research_question: str
     proposed_approach: str = ""
+    judge_summary: str = ""
     supported_findings: list[str] = field(default_factory=list)
     hypotheses: list[str] = field(default_factory=list)
     unresolved_objections: list[str] = field(default_factory=list)

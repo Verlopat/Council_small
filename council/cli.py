@@ -230,7 +230,11 @@ def main(argv=None) -> int:
             detail = verdict.get("cause")
             print("Judge verdict: " + str(verdict.get("status", "unresolved")) +
                   (" | cause: " + str(detail) if detail else ""))
-        print("\nProposed approach:\n" + (brief["proposed_approach"] or "(none)"))
+        print("\nProposed approach (solver original):\n" +
+              (brief["proposed_approach"] or "(none)"))
+        if brief.get("judge_summary"):
+            print("\nBlind judge summary (not the solver answer):\n" +
+                  brief["judge_summary"])
         print("\nHypotheses:\n" + "\n".join("- " + x for x in brief["hypotheses"]))
         print("\nUnresolved reviewer objections:\n" + (
             "\n".join("- " + x for x in brief["unresolved_objections"]) or "(none)"))

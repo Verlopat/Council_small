@@ -80,17 +80,107 @@ class AnchoredClaim:
     quantifiers: tuple[str, ...]
     depends_on: tuple[str, ...]
 
+# Narrow, reversible *formatting* equivalences. Never lowercase variable names,
+# delete words, reorder tokens, or accept paraphrases as source provenance.
+_FORMAT_DASH = dict.fromkeys(map(ord, "\u2010\u2011\u2012\u2013\u2014\u2212"), "-")
+_FORMAT_QUOTES = str.maketrans({"\u2018": "'", "\u2019": "'",
+                                "\u201c": '"', "\u201d": '"'})
+_TEX_TOKENS = {
+    r"\neq": "≠", r"\ne": "≠", r"\leq": "≤", r"\geq": "≥",
+    r"\in": "∈", "^{*}": "*", "^*": "*",
+}
+
+
+def _locate_chars(source: str) -> tuple[str, list[tuple[int, int]]]:
+    """Return a canonical rendering and offsets back to the original source."""
+    out: list[str] = []
+    offsets: list[tuple[int, int]] = []
+    i = 0
+    while i < len(source):
+        start = i
+        token = None
+        for lhs, rhs in _TEX_TOKENS.items():
+            if source.startswith(lhs, i):
+                end = i + len(lhs)
+                if lhs.startswith("\\") and end < len(source) and source[end].isalpha():
+                    continue
+                token = rhs
+                i = end
+                break
+        if token is None:
+            if source.startswith("**", i):
+                i += 2
+                continue
+            if source.startswith(r"\(", i) or source.startswith(r"\)", i):
+                i += 2
+                continue
+            token = source[i]
+            i += 1
+            if token in ("$", chr(96)):
+                continue
+        token = unicodedata.normalize("NFKC", token)
+        token = token.translate(_FORMAT_DASH).translate(_FORMAT_QUOTES)
+        for ch in token:
+            if ch.isspace():
+                if out and out[-1] != " ":
+                    out.append(" ")
+                    offsets.append((start, i))
+            else:
+                out.append(ch)
+                offsets.append((start, i))
+    while out and out[-1] == " ":
+        out.pop()
+        offsets.pop()
+    # Spaces around mathematical relational operators are presentation;
+    # spaces separating ordinary words remain significant.
+    packed, packed_offsets = [], []
+    for j, ch in enumerate(out):
+        if ch == " " and (
+                (j > 0 and out[j-1] in "≠≤≥∈") or
+                (j+1 < len(out) and out[j+1] in "≠≤≥∈")):
+            continue
+        packed.append(ch)
+        packed_offsets.append(offsets[j])
+    return "".join(packed), packed_offsets
+
+
+def locate_source_span(answer: str, span: str) -> str | None:
+    """Find formatting-equivalent text and return original, unmodified bytes.
+
+    This permits only bounded Unicode/TeX formatting substitutions. It never
+    considers a paraphrase or an LLM-supplied semantic equivalence sufficient.
+    """
+    if not isinstance(answer, str) or not isinstance(span, str) or not span.strip():
+        return None
+    if span in answer:
+        return span
+    normalized_answer, offsets = _locate_chars(answer)
+    normalized_span, _ = _locate_chars(span)
+    if not normalized_span or not offsets:
+        return None
+    where = normalized_answer.find(normalized_span)
+    if where < 0:
+        return None
+    end = where + len(normalized_span) - 1
+    if end >= len(offsets):
+        return None
+    return answer[offsets[where][0]:offsets[end][1]]
+
+
 def validate_anchor(answer: str, statement: str, span: str,
                     *, assumptions: list[str] | None = None,
                     depends_on: list[str] | None = None) -> AnchoredClaim:
     from hashlib import sha256
-    if not statement.strip() or not span.strip() or span not in answer:
-        raise ValueError("Claim requires exact quoted source span")
-    original_q = tuple(sorted(set(m.group(0).lower() for m in QUANTIFIERS.finditer(span))))
+    if not isinstance(statement, str) or not statement.strip():
+        raise ValueError("Claim requires a nonempty statement")
+    actual_span = locate_source_span(answer, span)
+    if actual_span is None:
+        raise ValueError("Claim requires an exact or formatting-equivalent source span")
+    original_q = tuple(sorted(set(m.group(0).lower() for m in QUANTIFIERS.finditer(actual_span))))
     rewritten_q = tuple(sorted(set(m.group(0).lower() for m in QUANTIFIERS.finditer(statement))))
     if original_q != rewritten_q:
         raise ValueError("Quantifier or modality changed between source and claim")
-    return AnchoredClaim(statement.strip(), span,
+    return AnchoredClaim(statement.strip(), actual_span,
                          sha256(answer.encode()).hexdigest(),
                          tuple(assumptions or ()), original_q, tuple(depends_on or ()))
 

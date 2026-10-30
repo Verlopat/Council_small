@@ -14,7 +14,7 @@ from council.assignment import Assignment
 from council.dependencies import Dependency
 from council.bus import MessageCap, MessageBus
 from council.evidence import EvidenceRejected
-from council.extract import validate_anchor, suggest_duplicate_claims
+from council.extract import validate_anchor, locate_source_span, suggest_duplicate_claims
 from council.judge import blind_ledger, enforce_verdict, judge_failure
 from council.ledger import SQLiteLedger
 from council.models import Claim, ClaimStatus, Evidence, EvidenceKind, ResearchResult, Objection, AuthorResponse
@@ -109,19 +109,21 @@ class FullCouncilRunner(CouncilRunner):
                     candidates.append(declared_span)
                 # The only auto-repair is a *verbatim* statement already in
                 # the original response. Never infer paraphrase equivalence.
-                if claim.statement in source_text and claim.statement not in candidates:
+                if (locate_source_span(source_text, claim.statement) is not None
+                        and claim.statement not in candidates):
                     candidates.append(claim.statement)
                 for candidate in candidates:
                     try:
                         anchored=validate_anchor(
                             source_text,claim.statement,candidate,
                             assumptions=assumptions)
-                        recovered=candidate!=declared_span
+                        recovered=(candidate!=declared_span
+                                   or candidate!=anchored.source_span)
                         break
                     except ValueError as exc:
                         reason=("quantifier_or_modality_mismatch"
                                 if "Quantifier or modality" in str(exc)
-                                else "source_span_not_exact")
+                                else "source_span_not_located")
                 if anchored is not None:
                     if recovered or source_name!="approach":
                         self.events.record("claim_anchor_recovered",claim_id=cid,
@@ -765,15 +767,16 @@ class FullCouncilRunner(CouncilRunner):
             "partial_answer":brief.proposed_approach,"cause":"judge_error"},
             self.ledger)
         partial=verdict.get("partial_answer")
+        # A blind judge sees the claim ledger, not the author's complete prose.
+        # Keep the original solver explanation as the proposed approach even
+        # when the judge returns a valid but unhelpfully short summary.
         if isinstance(partial,str) and partial.strip():
-            brief.proposed_approach=partial.strip()
+            brief.judge_summary=partial.strip()
         else:
-            # Keep the original authored proposal instead of printing "null".
-            # Judge may be unresolved, but the draft still exists.
             self.events.record("judge_partial_fallback",
                                reason="missing_or_non_substantive_summary")
             brief.limitations.append(
-                "Judge supplied no substantive summary; retained solver proposal")
+                "Judge supplied no substantive summary; original solver proposal retained")
         composition=compose_answer(
             str(verdict.get("answer") or brief.proposed_approach or ""),
             [c.id for c in self.ledger.claims.values()], self.ledger)

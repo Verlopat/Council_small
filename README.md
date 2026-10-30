@@ -198,3 +198,37 @@ https://www.rfc-editor.org/rfc/rfc9381.html
 
 The standalone offline unittest suite remains removed at the owner's
 request; these code changes require live owner-machine validation.
+
+## Solver explanations, judge notes, and formatting-only quote recovery
+
+**The solver's original proposed approach is retained.** A blind judge
+receives the claims/evidence ledger rather than the full solver answer, so
+its `partial_answer` is now stored separately as
+`research_result.judge_summary` and printed as "Blind judge summary".
+Even a valid judge response cannot overwrite the solver's prose. The
+composition checker still treats unsupported prose as unverified.
+
+The source-anchoring stage permits limited formatting variants (Unicode
+hyphens and typographic quotation marks, LaTeX relation operators such as
+`\\neq` versus `≠`, Markdown math/inline wrappers, and whitespace around
+relation operators). It retains the **original exact substring** from the
+source answer, its source hash, and the existing quantifier/modality guard.
+It does not perform fuzzy matching, case-fold variables, accept paraphrases,
+or claim that matching a sentence verifies its semantics. Some claims may
+still fail anchoring because their actual content differs from the proposal.
+
+For common VRF game-definition errors, advisory checks now also flag
+potentially missing public-key choice in full uniqueness, a reference
+challenge output instead of two valid outputs, the wrong ideal
+pseudorandomness distribution, and omitted evaluation-oracle/freshness
+conditions. Their absence is not evidence of security. See
+[local RFC 9381 interpretation notes](references/rfc9381_vrf_games.md)
+with links to the official RFC sections. These are *paraphrases*; they are
+not automatic theorem validators, nor are they evidence that lattice
+reductions have been proved.
+
+```bash
+git pull origin main
+python -m council.cli --mode quick --deadline 180 \
+  "Explain VRF full uniqueness, trusted uniqueness, and pseudorandomness games"
+```
