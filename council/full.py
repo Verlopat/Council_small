@@ -87,19 +87,50 @@ class FullCouncilRunner(CouncilRunner):
         self.author_responses=[]
 
     def _anchors(self,p:dict,body:dict)->None:
-        answer=body.get("answer") or p["approach"]
-        if not isinstance(answer,str):answer=p["approach"]
+        # Only text authored in this proposal can establish provenance. A
+        # statement appearing later in the blind judge answer is not an anchor.
+        sources=[("approach",p["approach"])]
+        answer=body.get("answer")
+        if isinstance(answer,str) and answer and answer!=p["approach"]:
+            sources.append(("answer",answer))
         for raw,cid in zip(item_list(body,"claims"),p["claim_ids"]):
             claim=self.ledger.claims[cid]
-            span=raw.get("source_span") or raw.get("span")
-            if not isinstance(span,str):
-                span=claim.statement if claim.statement in answer else ""
-            if not span:continue
-            try:
-                anchored=validate_anchor(answer,claim.statement,span,
-                      assumptions=string_list(raw,"assumptions"))
-            except ValueError:
-                self.warnings.append("Unanchored or quantifier-changing claim: "+cid)
+            declared_span=raw.get("source_span") or raw.get("span")
+            assumptions=string_list(raw,"assumptions")
+            anchored=None
+            reason="no_exact_source_span"
+            recovered=False
+            for source_name,source_text in sources:
+                candidates=[]
+                if isinstance(declared_span,str) and declared_span.strip():
+                    candidates.append(declared_span)
+                # The only auto-repair is a *verbatim* statement already in
+                # the original response. Never infer paraphrase equivalence.
+                if claim.statement in source_text and claim.statement not in candidates:
+                    candidates.append(claim.statement)
+                for candidate in candidates:
+                    try:
+                        anchored=validate_anchor(
+                            source_text,claim.statement,candidate,
+                            assumptions=assumptions)
+                        recovered=candidate!=declared_span
+                        break
+                    except ValueError as exc:
+                        reason=("quantifier_or_modality_mismatch"
+                                if "Quantifier or modality" in str(exc)
+                                else "source_span_not_exact")
+                if anchored is not None:
+                    if recovered or source_name!="approach":
+                        self.events.record("claim_anchor_recovered",claim_id=cid,
+                            method="verbatim_statement_or_original_answer",
+                            source_field=source_name)
+                    break
+            if anchored is None:
+                self.warnings.append(cid+": source anchoring failed ("+reason+")")
+                self.events.record("claim_anchor_rejected",claim_id=cid,
+                                   reason=reason)
+                self.extra_obligations.append(
+                    cid+": provide an exact quote from the original proposal")
                 continue
             claim.source_span=anchored.source_span
             claim.assumptions=list(anchored.assumptions)
@@ -671,11 +702,24 @@ class FullCouncilRunner(CouncilRunner):
                                   if c.status is ClaimStatus.SUPPORTED]
         brief.checked_source_ids=sorted(self.checked_sources)
         brief.proposed_approach=" | ".join(p["approach"] for p in proposals)
-        brief.proof_obligations=list(dict.fromkeys(self.extra_obligations))
-        brief.unresolved_objections=list(dict.fromkeys(self.coverage+
-            [o.id+": "+o.issue+" (not yet independently resolved)" for o in self.objections]+
-            [c.id+": "+c.statement for c in self.ledger.claims.values()
-             if c.status in {ClaimStatus.PROPOSED,ClaimStatus.UNRESOLVED}]))
+        open_claims=[c for c in self.ledger.claims.values()
+                     if c.status in {ClaimStatus.PROPOSED,ClaimStatus.UNRESOLVED}]
+        brief.proof_obligations=list(dict.fromkeys(
+            self.extra_obligations+
+            [c.id+": "+c.statement+" (not independently established)"
+             for c in open_claims]))
+        # Unverified claims are obligations, not actual reviewer objections.
+        brief.unresolved_objections=list(dict.fromkeys(
+            self.coverage+
+            [o.id+": "+o.issue+" (not yet independently resolved)"
+             for o in self.objections]))
+        if brief.proof_obligations:
+            brief.next_actions.append(
+                "Check the listed claims against independent evidence before "
+                "treating this proposal as a verified result")
+        if any(c.source_span is None for c in open_claims):
+            brief.next_actions.append(
+                "Supply verbatim claim quotations from the original proposal")
         # Judge input is blind to authors, family IDs and raw model transcripts.
         try: ledger_view=blind_ledger(self.ledger)
         except ValueError:
@@ -698,7 +742,8 @@ class FullCouncilRunner(CouncilRunner):
             str(verdict.get("answer") or verdict.get("partial_answer") or ""),
             [c.id for c in self.ledger.claims.values()], self.ledger)
         if composition.blocking:
-            brief.limitations.append("Composition contains unverified claims")
+            brief.limitations.append(
+                "Final prose contains assertions without independent verification")
             assembled=Claim("composition:1",1,
                 "Assembled answer has claims without independently scoped verification",
                 "coordinator",status=ClaimStatus.UNRESOLVED)
@@ -708,8 +753,13 @@ class FullCouncilRunner(CouncilRunner):
             verdict=enforce_verdict(dict(verdict,status="unresolved",
                 cause="composition_failure"),self.ledger)
             verdict["cause"]="composition_failure"
-        brief.unresolved_objections=list(dict.fromkeys(brief.unresolved_objections+
-                            list(verdict["blocking"])))
+        # Keep all judge blockers visible, but do not relabel them as
+        # objections raised by a reviewer. The blocking IDs are in verdict.
+        brief.proof_obligations=list(dict.fromkeys(
+            brief.proof_obligations+
+            [cid+": independent verification required"
+             for cid in verdict["blocking"]
+             if not any(item.startswith(cid+":") for item in brief.proof_obligations)]))
         audit=None
         if mode!="quick" and self.auditor_family is not None:
             audit=await self._call(self.auditor_family,"audit",{"question":question,

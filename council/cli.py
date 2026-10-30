@@ -227,9 +227,13 @@ def main(argv=None) -> int:
         print("\nRun: " + run_id + " | status: " + brief["completion_status"])
         print("\nProposed approach:\n" + (brief["proposed_approach"] or "(none)"))
         print("\nHypotheses:\n" + "\n".join("- " + x for x in brief["hypotheses"]))
-        print("\nUnresolved objections:\n" + "\n".join(
-            "- " + x for x in brief["unresolved_objections"]))
-        print("\nNext actions:\n" + "\n".join("- " + x for x in brief["next_actions"]))
+        print("\nUnresolved reviewer objections:\n" + (
+            "\n".join("- " + x for x in brief["unresolved_objections"]) or "(none)"))
+        print("\nUnverified claims and proof obligations:\n" + (
+            "\n".join("- " + x for x in brief.get("proof_obligations", []))
+            or "(none)"))
+        print("\nNext actions:\n" + (
+            "\n".join("- " + x for x in brief["next_actions"]) or "(none)"))
         print("\nLimitations:\n" + "\n".join("- " + x for x in brief["limitations"]))
         print("\nStructured records saved locally to " + str(args.run_dir / (run_id + ".sqlite3")))
     return 0

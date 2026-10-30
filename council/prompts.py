@@ -15,8 +15,12 @@ Return ONE complete JSON object with required top-level keys:
 approach (nonempty string), claims (nonempty list), hypotheses (list of strings),
 experiments (list of strings). Every claim has keys id, statement,
 source_span, assumptions, limitations, depends_on, dependency_argument.
-All claim fields are required. source_span must quote an exact substring
-of approach. Use [] for unused lists and "" for an unused dependency_argument.
+All claim fields are required. To make claim provenance unambiguous,
+write each claim's complete statement VERBATIM somewhere in approach and set
+source_span to that exact statement, without changing any words, negations,
+modalities or quantifiers. Do not invent new claims or pretend the cited
+statement is proved by its presence in the approach.
+Use [] for unused lists and "" for an unused dependency_argument.
 If you use depends_on, provide a concrete argument for the dependency.
 Claims must be atomic, and must not claim tests, formal proofs, or citations were
 checked. Dependency IDs refer only to earlier claims in your own proposal.

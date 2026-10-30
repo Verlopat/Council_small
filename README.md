@@ -114,3 +114,22 @@ Once you `git pull origin main`, retry your real quick question. If it still
 returns `unresolved`, the recorded error reason can be inspected safely
 from the local `runs/RUN_ID.sqlite3` event log without exposing the model
 response, prompts or API keys.
+
+## Interpreting quick-mode claim verification
+
+The quick run produces an unverified research sketch first. It can return
+`partial` with `unresolved` claim/verdict status even when the answer sounds
+plausible: this is intentional, not proof that the statements are false.
+
+Claims must quote an **exact** span in the original solver's approach or answer.
+If the model supplies an incorrect span but its entire claim statement occurs
+verbatim in the original text, Council can recover that exact quote. It never
+assumes two merely similar sentences mean the same thing. Failed anchoring
+records `claim_anchor_rejected` with a safe reason; successful literal
+recovery records `claim_anchor_recovered`.
+
+The terminal now labels non-supported statements as proof obligations,
+not as reviewer objections. Unverified composed prose remains a blocking
+item until appropriately scoped evidence exists. No new cryptographic
+security theorem is certified simply because a citation or exact quote
+was found.
