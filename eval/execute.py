@@ -19,7 +19,20 @@ from eval.baselines import majority,best_of_n,family_vote
 from council.verify.arithmetic import check
 from answer_validation import matches_expected
 
-async def run_task(task,transport,events,*,deadline,baseline_samples=3):
+def requested_baseline_calls(council_calls: int, *, user_limit: int = 0,
+                             safety_cap: int = 55) -> int:
+    """Default: match Council's API-call count, subject to an explicit cap.
+
+    user_limit=0 means try to match the full observed count. A truncated
+    baseline must be flagged as unequal and excluded from paired comparisons.
+    Matching calls is not the same as matching tokens, latency or tool access.
+    """
+    if council_calls < 0 or user_limit < 0 or safety_cap < 1:
+        raise ValueError("Invalid baseline budget")
+    return min(council_calls, user_limit or council_calls, safety_cap)
+
+
+async def run_task(task,transport,events,*,deadline,baseline_samples=0):
     q=task["prompt"]
     budget=RunBudget.start(deadline,reserve=min(15.,deadline/4))
     initial=time.monotonic()
@@ -40,7 +53,10 @@ async def run_task(task,transport,events,*,deadline,baseline_samples=3):
         output["manual_review_required"]=True
     baseline_outputs=[]
     baseline_budget=RunBudget.start(deadline,reserve=0)
-    target_samples=min(model_calls,baseline_samples)
+    target_samples = requested_baseline_calls(
+        model_calls, user_limit=baseline_samples)
+    output["baseline_target_calls"] = target_samples
+    output["comparison_basis"] = "equal API calls only; token and tool costs not yet matched"
     for sample_id in range(target_samples):
         if baseline_budget.remaining()<=5:break
         try:
@@ -133,19 +149,20 @@ def main(argv=None):
     parser.add_argument("--split",choices=("dev","heldout"),default="dev")
     parser.add_argument("--max-tasks",type=int,default=3)
     parser.add_argument("--deadline",type=float,default=240)
-    parser.add_argument("--baseline-samples",type=int,default=3)
+    parser.add_argument("--baseline-samples",type=int,default=0,
+                        help="0 (default) aims to match Council calls, capped at 55; explicit positive value is a smaller hard cap")
     parser.add_argument("--out-dir",type=Path,default=Path("runs")/"eval")
     parser.add_argument("--confirm-free",action="store_true")
     args=parser.parse_args(argv)
-    if not 1<=args.max_tasks<=100 or not 1<=args.baseline_samples<=50:
+    if not 1<=args.max_tasks<=100 or not 0<=args.baseline_samples<=55:
         parser.error("Unsafe task or sample count")
     tasks=load(args.tasks,split=args.split)
-    upper_calls=args.max_tasks*(55+args.baseline_samples+6)
+    upper_calls=args.max_tasks*(55+(args.baseline_samples or 55)+6)
     if not args.confirm_free:
         print(json.dumps({"mode":"plan_only","tasks":min(len(tasks),args.max_tasks),
                           "per_task_deadline":args.deadline,
                           "max_possible_calls_warning":upper_calls,
-                          "warning":"No APIs called. Confirm free/non-billed account limits."},indent=2))
+                          "warning":"No APIs called. Confirm free/non-billed account limits. Equal CALLS are not equal TOKENS or tool availability."},indent=2))
         return
     path,rows=asyncio.run(execute(tasks,out_dir=args.out_dir,
                        deadline=args.deadline,max_tasks=args.max_tasks,
