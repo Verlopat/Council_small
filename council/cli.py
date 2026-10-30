@@ -228,6 +228,16 @@ def main(argv=None) -> int:
     else:
         brief = result["research_result"]
         print("\nRun: " + run_id + " | status: " + brief["completion_status"])
+        coverage = result.get("role_coverage")
+        if isinstance(coverage, dict) and args.mode == "full":
+            expected = coverage.get("requested_solvers", [])
+            actual = coverage.get("valid_proposer_families", [])
+            audited = bool(coverage.get("independent_audit_completed"))
+            print("Full-mode coverage: " + str(len(actual)) + "/" +
+                  str(len(expected)) + " valid solver proposals; " +
+                  str(coverage.get("review_objection_count", 0)) +
+                  " recorded objections; independent audit " +
+                  ("completed" if audited else "unavailable"))
         verdict = result.get("verdict")
         if isinstance(verdict, dict):
             detail = verdict.get("cause")
