@@ -454,6 +454,25 @@ class FullCouncilRunner(CouncilRunner):
                     await self._hunt(repair_claim,reviewer,self.moderator.current_round)
             if repair_claim.status is not ClaimStatus.SUPPORTED:
                 self.extra_obligations.append(new_id+": verify repaired meaning independently")
+        # A repair may produce genuinely new verifier evidence. Only then may
+        # a subsequent challenge round open. This is not another free-form
+        # debate: Moderator.begin_next_round() enforces evidence gating.
+        if (self.hunter_cap > 0 and self.budget.debate_remaining() > 2
+                and self.moderator.begin_next_round()):
+            self.events.record("evidence_gated_followup_round",
+                               round=self.moderator.current_round)
+            remaining = [self.ledger.claims[cid]
+                         for cid in self.moderator.priority_order()
+                         if self.ledger.claims[cid].status in
+                         {ClaimStatus.PROPOSED, ClaimStatus.UNRESOLVED}]
+            for claim in remaining[:self.hunter_cap]:
+                if self.budget.debate_remaining() <= 1:
+                    break
+                hunter = next((f for f in self.solvers
+                               if f != claim.owner_family), None)
+                if hunter:
+                    await self._hunt(claim, hunter,
+                                     self.moderator.current_round)
         brief=ResearchResult(research_question=question,
                              completion_status="partial")
         brief.hypotheses=list(dict.fromkeys(h for p in proposals for h in p["hypotheses"]))
