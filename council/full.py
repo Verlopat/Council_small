@@ -10,6 +10,7 @@ import hashlib
 import json
 import time
 import os
+import re
 from types import SimpleNamespace
 
 from council.assignment import Assignment
@@ -777,10 +778,21 @@ class FullCouncilRunner(CouncilRunner):
                     if (hunter := next((f for f in self.solvers
                                         if f != claim.owner_family), None))]
             await self._hunt_batch(jobs)
+        # Inspect each numbered source sentence separately. Scanning a
+        # concatenated proposal can mix assumptions from distinct games.
+        approach_segments=[]
+        for p in proposals:
+            chunks=re.split(r"(?m)^\s*(?=\[S[0-9]+\])",p["approach"])
+            parts=[x.strip() for x in chunks if x.strip()]
+            if len(parts)<=1:
+                approach_segments.append(SimpleNamespace(
+                    id=p["id"]+":approach",statement=p["approach"]))
+            else:
+                for pos,part in enumerate(parts,1):
+                    approach_segments.append(SimpleNamespace(
+                        id=p["id"]+":approach:"+str(pos),statement=part))
         proposed_findings=scan_vrf_games(
-            question, list(self.ledger.claims.values()) +
-            [SimpleNamespace(id=p["id"]+":approach",statement=p["approach"])
-             for p in proposals])
+            question, list(self.ledger.claims.values()) + approach_segments)
         # Approach-level warnings are useful only for kinds not already
         # attributed to an individual claim in the same proposal.
         per_proposal_claim_kinds={}
@@ -805,7 +817,10 @@ class FullCouncilRunner(CouncilRunner):
         brief.supported_findings=[c.statement for c in self.ledger.claims.values()
                                   if c.status is ClaimStatus.SUPPORTED]
         brief.checked_source_ids=sorted(self.checked_sources)
-        brief.proposed_approach=" | ".join(p["approach"] for p in proposals)
+        brief.proposed_approach=(
+            proposals[0]["approach"] if len(proposals)==1 else
+            "\n\n".join("Proposal "+p["id"]+" ("+p["family"]+"):\n"+
+                         p["approach"] for p in proposals))
         open_claims=[c for c in self.ledger.claims.values()
                      if c.status in {ClaimStatus.PROPOSED,ClaimStatus.UNRESOLVED}]
         brief.proof_obligations=group_by_claim_id(
@@ -817,6 +832,14 @@ class FullCouncilRunner(CouncilRunner):
             self.coverage+
             [o.id+": "+o.issue+" (not yet independently resolved)"
              for o in self.objections]))
+        if mode=="full" and len(proposals)<len(self.solvers):
+            brief.limitations.append(
+                "Reduced independent proposal coverage: "+
+                str(len(proposals))+"/"+str(len(self.solvers))+
+                " configured solver families returned valid proposals")
+            brief.next_actions.append(
+                "Restore missing independently reserved solver families using "
+                "confirmed free allowances before relying on full review")
         if brief.proof_obligations:
             brief.next_actions.append(
                 "Check the listed claims against independent evidence before "
@@ -914,7 +937,11 @@ class FullCouncilRunner(CouncilRunner):
         elif mode!="quick":
             brief.limitations.append(
                 "Independent auditor not assigned" if self.auditor_family is None
-                else "Independent auditor unavailable")
+                else "Independent auditor unavailable; full-mode result lacks "
+                     "the reserved independent audit stage")
+            brief.next_actions.append(
+                "Restore the reserved auditor using a confirmed free allowance "
+                "or treat this run as unaudited")
         brief.completion_status=("partial" if proposals else "unresolved")
         brief.limitations=list(dict.fromkeys(brief.limitations+self.warnings))
         result={"research_result":brief.to_dict(),"proposals":proposals,
@@ -929,6 +956,11 @@ class FullCouncilRunner(CouncilRunner):
             "advisory_findings":advisory_findings,
             "reference_checks":self.reference_checks,
             "judge_source":"local_policy" if local_judge else "model",
+            "role_coverage":{"requested_solvers":list(self.solvers),
+                "valid_proposer_families":[p["family"] for p in proposals],
+                "review_objection_count":len(self.objections),
+                "independent_audit_completed":bool(audit) if mode!="quick" else False,
+                "audit_family":self.auditor_family if mode!="quick" else None},
             "warnings":self.warnings}
         if hasattr(self.events,"db") and hasattr(self.events,"run_id"):
             SQLiteLedger(self.events.db).save(self.events.run_id,self.ledger)

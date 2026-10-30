@@ -31,11 +31,20 @@ def classify(question: str, statement: str) -> tuple[str, str] | None:
     if not re.search(r"\bvrf\b|verifiable random function", question, re.I):
         return None
     text = topic_text(statement)
-    if not re.search(r"\bgame\b|\bdefinition\b|\bdefines?\b", text):
-        return None
-    # Do not skip genuine claims about a proof, reduction or implementation.
-    if re.search(r"\breduc(?:es?|tion)\b|\bproof of\b|\bunder (?:lwe|sis)\b",
+    # Do not skip genuine construction, formal reduction, empirical claim,
+    # or theorem assertion. This route locates source *definitions* only.
+    if re.search(r"\breduc(?:es?|tion)\b|\bproof of\b|\bunder (?:lwe|sis)\b|"
+                 r"\b(?:this|our|the proposed) (?:scheme|construction|vrf)\b|"
+                 r"\b(?:satisfies|achieves|is secure|holds assuming|follows from)\b",
                  text):
+        return None
+    # A definition can be expressed as a declarative requirement without
+    # literally saying 'game': 'Full uniqueness requires that...'.
+    definitional = re.search(
+        r"\bgame\b|\bdefinition\b|\bdefines?\b|\brequires?\b|"
+        r"\bassumes?\b|\bensures?\b|\bmeans?\b|\bproperty\b|"
+        r"\b(?:cannot|must not|infeasible|adversary)\b", text)
+    if not definitional:
         return None
     for label, heading, section in DEFINITIONS:
         if label in text:

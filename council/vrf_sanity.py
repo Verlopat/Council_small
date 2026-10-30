@@ -74,6 +74,51 @@ def scan_vrf_games(question: str, claims) -> list[dict]:
                           "Selective security uses an earlier adversarial "
                           "commitment, not a random target.",
                 "reference":"RFC 9381 Section 3.4"})
+        if is_unique and len(text.split()) <= 5:
+            findings.append({
+                "claim_id":cid,
+                "kind":"uniqueness_definition_underspecified",
+                "message":"A label such as 'Full uniqueness property' is "
+                          "not a security game definition. State the public "
+                          "key choice, common input, two valid proofs and "
+                          "different outputs explicitly.",
+                "reference":"RFC 9381 Sections 3.1/3.3"})
+        # A uniqueness *definition* cannot require injective evaluations
+        # on all distinct inputs. That is the collision-resistance notion,
+        # whether the model asserts an actual collision or its impossibility.
+        if is_unique and different_inputs and re.search(
+                r"\b(?:outputs?|hashes?)\b.{0,65}\b(?:differ|different|"
+                r"distinct|unequal|not equal)\b|"
+                r"\b(?:outputs?|hashes?)\s*(?:!=|≠)\b", text, re.I):
+            findings.append({
+                "claim_id":cid,
+                "kind":"uniqueness_injectivity_conflation",
+                "message":"The claim imposes different outputs for distinct "
+                          "inputs. That is an injectivity/collision-resistance "
+                          "condition, not VRF uniqueness, which fixes one "
+                          "input and rules out two accepted outputs.",
+                "reference":"RFC 9381 Sections 3.1–3.3"})
+        if FULL.search(text) and re.search(
+                r"\b(?:honest|honestly generated|trusted)\s+"
+                r"(?:public\s+)?key\b",text,re.I) and not re.search(
+                r"\b(?:malicious|adversarial|arbitrary)\s+"
+                r"(?:public\s+)?keys?\b",text,re.I):
+            findings.append({
+                "claim_id":cid,
+                "kind":"full_uniqueness_honest_key_only",
+                "message":"The definition appears restricted to honest "
+                          "public keys. Full uniqueness must include "
+                          "adversarially selected public keys.",
+                "reference":"RFC 9381 Section 3.1"})
+        if TRUSTED.search(text) and re.search(
+                r"\b(?:malicious|adversarial)\s+key\s+generation\b",text,re.I):
+            findings.append({
+                "claim_id":cid,
+                "kind":"trusted_uniqueness_malicious_key_contradiction",
+                "message":"Trusted uniqueness does not require security "
+                          "under malicious key generation; that stronger "
+                          "condition belongs to full uniqueness.",
+                "reference":"RFC 9381 Section 3.3"})
         # The game type can be valid even if the model uses signature
         # terminology; flag the ambiguity rather than silently equating APIs.
         if re.search(r"\bsigning\s+oracle\b",text,re.I) and (
@@ -200,7 +245,10 @@ def scan_vrf_games(question: str, claims) -> list[dict]:
                              r"(?:choos|select|generat|suppl).{0,50}"
                              r"(?:key|PK|public)\b|"
                              r"(?:PK|public\s+key).{0,40}chosen\s+by\s+"
-                             r"(?:the\s+)?adversary",text,re.I):
+                             r"(?:the\s+)?adversary|"
+                             r"\b(?:malicious|adversarial|arbitrary)\s+"
+                             r"(?:public\s+)?keys?\b|"
+                             r"\bany\s+(?:valid\s+)?public\s+key\b",text,re.I):
                 findings.append({
                     "claim_id":cid,"kind":"full_uniqueness_key_choice_unspecified",
                     "message":"Full uniqueness includes adversarially chosen "

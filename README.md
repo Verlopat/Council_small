@@ -357,3 +357,48 @@ The quick local evidence summary remains a brief policy statement and
 is no longer overwritten with the full solver answer. The Council
 still treats unsound or unverified prose as partial/unresolved; RFC
 heading checks are source provenance, not semantic entailment.
+
+## Full-mode review coverage and VRF definition regression (October 2026)
+
+A `--mode full` run can still return `partial` when free providers do
+not respond or when required roles cannot run. It must not imply that
+three independent solvers and the reserved auditor completed their work.
+
+Use `python -m council.cli --provider-report --mode full` first.
+The report includes `active_attempt_eligible_families` and
+`active_not_ready_families`, and per-provider
+`eligible_for_attempt`. These mean only that an API key and any
+required local non-billed/free-mode confirmation are present. They are
+**not live connectivity or quota checks**.
+
+Cohere's solver family requires `COHERE_TRIAL_CONFIRMED=1` and
+Ollama Cloud's auditor requires `OLLAMA_FREE_CONFIRMED=1` in the
+environment **only if you have independently confirmed usable free
+allowances with no unexpected charges**. Never set either flag blindly
+or assume the service has a particular remaining quota. If a family
+is unavailable, the Council preserves reservations and reports the
+result as reduced independent proposal coverage or missing audit,
+rather than silently assigning an already-used judge or solver to
+that role. The structured output includes `role_coverage`.
+
+For multiple successful solver families, the CLI separates the
+original proposals and identifies their family, so mutually inconsistent
+answers are not merged into one undifferentiated paragraph.
+Automated checks examine numbered VRF source sentences individually.
+
+The RFC 9381 definition router now recognizes definitional statements
+such as "Full uniqueness requires..." and "Trusted uniqueness
+assumes...", even when the word "game" is omitted. It still never
+upgrades a claim to supported just because a source heading is found.
+Claims about a concrete scheme's security reductions do **not** get
+mistaken for a definitional citation.
+
+Security-game red flags now distinguish VRF uniqueness (a fixed input
+and two different accepted outputs) from collision resistance (two
+different inputs and the same accepted output). A statement demanding
+different outputs for *all* distinct inputs is likewise a
+collision-resistance/injectivity condition, **not** a definition of
+uniqueness. They also distinguish an honest-key-only statement from
+full uniqueness. These remain incomplete heuristic advisories; an
+absent warning or a model's reviewer objection does not constitute
+a cryptographic theorem or independent verification.
