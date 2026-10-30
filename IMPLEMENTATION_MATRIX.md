@@ -58,3 +58,25 @@ No claim of full architectural correctness, independent security verification, o
 - Connected optional Lean, ProVerif and Tamarin artifact dispatch to the universal-claim verifier path. Results are tagged as `formal_proof` evidence and **do not** gain independent natural-language claim correspondence by default.
 - Added offline regression tests covering formal dispatch and preflight failure paths. CI validates mocked behavior, not actual local namespace or formal-tool availability.
 - **Still not complete:** measured correctness against equal-budget baselines, account-specific free quotas and live model inference, formal translation soundness, and host-specific containment validation all remain outstanding.
+
+## Implementation progress after the previous 40-page audit (2026-10-30)
+
+These are code-level changes, not declarations of complete experimental proof:
+
+| Previously partial or missing requirement | Implemented additional behavior | Remaining qualification |
+| --- | --- | --- |
+| Eight providers | `council/providers.py` and `--provider-report` enumerate all eight and their eligible families | Live keys and free status need confirmation; providers are not eight independent votes |
+| Four independent solvers | Four-family configuration supported, with `auditor: null` explicitly reported | Four solvers plus translator, judge, and independent auditor require a seventh usable family |
+| Concurrent claim dialogue | Concurrent hunter inference followed by deterministic single-moderator commits; post-repair round evidence-gated | Full unrestricted asynchronous exchange is intentionally bounded by evidence and caps |
+| Revision checking | Reviewer follow-up plus scoped rechecking and separate audit | A revised proof remains unproved without independent valid evidence |
+| Dependency provenance | `_register_declared_dependencies` records versioned premises and argument text as unconfirmed edges; cycles rejected | A declared argument is never automatically valid support |
+| Claim canonicalization | `suggest_duplicate_claims` flags similar claims and records suggestions | No automatic semantic equivalence or unreviewed merge |
+| Evidence-backed source retrieval | Full workflow accepts a local `PaperIndex`, records located passage provenance | Quote existence does not certify meaning, truth, or novelty |
+| Composition check | Assembled integer recomputation and conservative unmapped-prose detection | Arbitrary multi-module code needs isolated end-to-end tests and specification review |
+| Quota and debate settings | Provider report, capped baseline, YAML debate caps, truthful local contention failures | User-owned daily/request/token account budgets remain necessary |
+| Evaluation baselines | Default baseline attempts equal API-call count; marks incomplete comparison | Equal tokens/tool budget, multiple seeds and held-out human scoring still required |
+| Weekly regression | Endpoints interleaved, partial coverage reported; owner must supply request cap | Live endpoint coverage remains opt-in and quota-dependent |
+
+The full specification contains both *implementable architecture* and
+*external validation conditions*. No safe implementation should claim every
+requirement completed solely because its file or class exists.

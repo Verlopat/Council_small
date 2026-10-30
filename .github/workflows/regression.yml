@@ -11,7 +11,7 @@ permissions:
 jobs:
   regression:
     # Disabled until repo owner explicitly opts in after checking all free quotas.
-    if: vars.COUNCIL_RUN_LIVE_REGRESSION == 'true'
+    if: vars.COUNCIL_RUN_LIVE_REGRESSION == 'true' && vars.COUNCIL_WEEKLY_MAX_REQUESTS != ''
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -33,7 +33,7 @@ jobs:
           COHERE_TRIAL_CONFIRMED: ${{ vars.COHERE_TRIAL_CONFIRMED }}
           OLLAMA_FREE_CONFIRMED: ${{ vars.OLLAMA_FREE_CONFIRMED }}
         run: |
-          python -m eval.regression_live --confirm-free --max-requests 20 --out runs/regression.jsonl
+          python -m eval.regression_live --confirm-free --max-requests '${{ vars.COUNCIL_WEEKLY_MAX_REQUESTS }}' --out runs/regression.jsonl
       - uses: actions/upload-artifact@v4
         with:
           name: scored-regression

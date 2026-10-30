@@ -118,3 +118,52 @@ Offline tests mock provider responses and exercise invariants; they do **not** c
 ## Architecture-v4 completeness
 
 See [IMPLEMENTATION_MATRIX.md](IMPLEMENTATION_MATRIX.md) for the requirement-by-requirement status, limitations, and validation gates. Source architecture includes proposals for future experimental components and ten open questions; some require your account settings, the actual provider responses and qualified human review. No code can truthfully declare those externally dependent results complete.
+
+## Recent feature completion and validation notes (2026-10-30)
+
+The older status checklist was an earlier snapshot. New and connected behaviors include:
+
+- `python -m council.cli --provider-report` shows all eight integrated providers,
+  their families, assignment participation, local key configuration and whether
+  Cohere/Ollama free-plan confirmation is still required. It does **not** call APIs.
+- Model-family first proposals are concurrent; claim-hunter inference is concurrent,
+  but the moderator applies responses in a deterministic order to avoid racing writes.
+- `council.yaml` solver strategies (`direct`, `code`, `decompose`) and per-thread
+  caps are applied in the full workflow and recorded for replay.
+- Solver-declared dependencies require an explicit argument and are recorded as
+  versioned **unconfirmed** edges until independently checked.
+- Similar atomic claims are suggested for review, not automatically merged.
+- The assembled numeric verdict is rechecked against a supported literal arithmetic
+  claim. A new, unmapped prose assertion stays unchecked.
+- A local, licensed paper index is connected to full-mode source checking.
+  Passing an exact quote does not imply the paper's statement is true.
+- Evaluation defaults to matching the Council's observed number of API calls
+  (`--baseline-samples 0`); caps and timeouts are labeled as unmatched. Equal
+  call count is **not** equal tokens or equal tool availability.
+- Weekly scored model probes distribute requests across endpoints and report
+  incomplete coverage. The GitHub Actions workflow requires explicit opt-in
+  and an owner-configured `COUNCIL_WEEKLY_MAX_REQUESTS` variable.
+
+### Example commands
+
+```bash
+python -m council.cli --provider-report --mode full
+python -m council.cli --mode full --dry-run "Evaluate a lattice VRF security game"
+python -m council.papers --db runs/papers.sqlite3 --id paper-1 --title "A paper" --license CC-BY-4.0 --text-file paper.txt
+python -m council.cli --mode full --paper-index runs/papers.sqlite3 --json "Compare the paper's proof obligations"
+python -m eval.execute runs/phase_a_dev.jsonl --max-tasks 3
+python -m council.preflight --json
+```
+
+To run four independent solvers rather than the default three, configure
+`gpt-oss, command, nemotron, gemma`, translator `glm`, judge `gemini`.
+Set `auditor: null` when no seventh usable family is available; the output
+will explicitly state that independent auditing was not performed. Assign
+`auditor: minimax` only after its actual final-answer response has been
+verified, and never count a nonworking endpoint as a successful audit.
+
+**Still requiring real validation:** all configured free account quotas and
+model identities, target-machine bubblewrap and formal-tool operation,
+independent proof/claim alignment, fair token-and-tool-budget benchmarking,
+held-out research scoring, interrupted-run recovery, and security testing.
+An offline green CI check cannot certify those external conditions.
