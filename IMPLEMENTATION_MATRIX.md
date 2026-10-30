@@ -51,3 +51,10 @@ This table distinguishes **source code included** from **the behavior independen
 7. The full implementation must earn every optional component (coverage, relevance, critics, repair, adaptive seeds) by ablation, not intuition.
 
 No claim of full architectural correctness, independent security verification, or publication-quality improvement is justified until those gates pass.
+
+### Subsequent implementation notes (2026-10-30)
+
+- Added `council/preflight.py`: an offline, fail-closed target-machine check for sandbox execution, network and host-home isolation, and API environment exclusion. It is not a substitute for a host-specific sandbox review.
+- Connected optional Lean, ProVerif and Tamarin artifact dispatch to the universal-claim verifier path. Results are tagged as `formal_proof` evidence and **do not** gain independent natural-language claim correspondence by default.
+- Added offline regression tests covering formal dispatch and preflight failure paths. CI validates mocked behavior, not actual local namespace or formal-tool availability.
+- **Still not complete:** measured correctness against equal-budget baselines, account-specific free quotas and live model inference, formal translation soundness, and host-specific containment validation all remain outstanding.

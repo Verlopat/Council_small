@@ -92,6 +92,19 @@ python -m eval.regression_live
 
 The optional GitHub Actions regression schedule is **off by default**. It requires the repository variable `COUNCIL_RUN_LIVE_REGRESSION=true` and secret API keys after you check quotas. Hash changes alone do not establish quality drift; scored regressions do.
 
+
+## Target-machine security preflight
+
+Before running model-generated checks on the target Linux machine, run:
+
+```bash
+python -m council.preflight --json
+```
+
+This makes **no API requests**. The preflight uses the existing fail-closed bubblewrap runner to test that an isolated interpreter can run, that outbound network connections are blocked, that host-home directories are not mounted, and that API-key environment variables are absent. It reports optional SymPy and Z3 availability separately. **This is not a comprehensive penetration test or a guarantee of confinement**; check local user namespace policies and mount behavior on the actual host. Do not enable unsafe host execution as a workaround.
+
+Formal proof tool adapters (`lean`, `tamarin`, `proverif`) are now selectable for universal claims when an explicit formal artifact is provided. A successful tool result supports only its submitted formal statement; the original prose and assumptions still require independent correspondence checking.
+
 ## Testing
 
 ```bash
