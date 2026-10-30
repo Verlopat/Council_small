@@ -142,6 +142,10 @@ class FamilyTransport:
                         output_tokens=used_output,
                         reserved_tokens=estimated_tokens if used_input is not None
                                           and used_output is not None else 0)
+                if failures:
+                    self.record("fallback_selected", role=role, family=family,
+                                provider=entry.provider, model=entry.model,
+                                skipped=list(failures))
                 self.record("model_call_succeeded", role=role, family=family,
                             provider=entry.provider, model=entry.model,
                             seconds=elapsed, response=text,

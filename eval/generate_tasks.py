@@ -7,15 +7,23 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-import random
 
 def build(*,per_kind:int=30,seed:int=20261029,split:str="dev")->list[dict]:
     if not 1<=per_kind<=1000 or split not in {"dev","heldout"}:
         raise ValueError("Invalid task count or split")
-    rng=random.Random(seed+(0 if split=="dev" else 300000))
+    # Explicit 32-bit LCG makes the checked-in fixtures reproducible across
+    # Python versions and easy to reproduce without hidden RNG state.
+    class PortableRNG:
+        def __init__(self, initial: int):
+            self.state = initial & 0xffffffff
+        def randint(self, low: int, high: int) -> int:
+            self.state = (1664525 * self.state + 1013904223) & 0xffffffff
+            return low + self.state % (high - low + 1)
+    rng=PortableRNG(seed+(0 if split=="dev" else 300000))
     tasks=[]
     for i in range(per_kind):
-        a,b=rng.randint(13,999),rng.randint(7,250)
+        a = (100 if split=="dev" else 2000) + i*11 + rng.randint(0,7)
+        b = rng.randint(7,250) if split=="dev" else rng.randint(301,550)
         c=rng.randint(1,30)
         expression=f"({a} * {b}) - {c}"
         expected=a*b-c
@@ -25,8 +33,8 @@ def build(*,per_kind:int=30,seed:int=20261029,split:str="dev")->list[dict]:
                       "expected":str(expected),
                       "checker_expression":expression,
                       "license":"original-generated","seed":seed})
-        k=rng.randint(2,20)
-        n=rng.randint(3,30)
+        k = (2 if split=="dev" else 100) + i
+        n = rng.randint(3,30) if split=="dev" else rng.randint(35,60)
         tasks.append({"id":f"{split[0].upper()}-C-{i:03d}",
                       "split":split,"kind":"code",
                       "prompt":f"Write Python function f(xs) returning sum(x*x + {k} for x in xs). Demonstrate on list(range({n})).",
@@ -35,7 +43,8 @@ def build(*,per_kind:int=30,seed:int=20261029,split:str="dev")->list[dict]:
                                      "behavior":"sum of x*x plus constant per list element",
                                      "constant":k,"test_input":list(range(n))},
                       "license":"original-generated","seed":seed})
-        u,v=rng.randint(1,20),rng.randint(1,20)
+        u = (1 if split=="dev" else 400) + i*3
+        v = rng.randint(1,30) if split=="dev" else rng.randint(100,130)
         tasks.append({"id":f"{split[0].upper()}-S-{i:03d}",
                       "split":split,"kind":"symbolic",
                       "prompt":f"Is (x + {u})*(x + {v}) equal to x**2 + {u+v}*x + {u*v} for every real x? Show an algebraic proof.",

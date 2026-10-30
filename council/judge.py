@@ -27,11 +27,17 @@ def enforce_verdict(proposed: dict, ledger: ClaimLedger) -> dict:
                       if c.status is not ClaimStatus.SUPPORTED or c.needs_re_evaluation)
     if blocking:
         wanted = "unresolved"
+    explicit = proposed.get("cause")
+    hard_causes = {"judge_error", "composition_failure", "deadline", "quota_contention"}
+    cause = (explicit if explicit in hard_causes else
+             ("blocking_claims" if blocking else explicit))
+    if explicit in hard_causes:
+        wanted = "unresolved"
     return {"status": wanted,
             "answer": proposed.get("answer") if wanted == "answer" else None,
             "partial_answer": proposed.get("partial_answer") or proposed.get("answer"),
             "blocking": blocking, "basis": proposed.get("basis", []),
-            "cause": "blocking_claims" if blocking else proposed.get("cause")}
+            "cause": cause}
 
 def judge_failure(ledger: ClaimLedger, partial: str = "") -> dict:
     return enforce_verdict({"status":"unresolved", "answer":None,

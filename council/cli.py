@@ -56,9 +56,13 @@ def main(argv=None) -> int:
                       {selection.translator, selection.judge, selection.auditor}
                       if selection else
                       {"gpt-oss", "command", "nemotron", "glm", "gemini", "gemma"})
+            active.discard(None)
             active.update(selection.optional.get("critics", []) if selection else [])
         elif args.mode == "quick":
-            active = {"gpt-oss", "glm", "gemini"}
+            selection = load_config(args.config) if args.config.is_file() else None
+            active = ({selection.solvers[0], selection.translator, selection.judge}
+                      if selection and selection.solvers
+                      else {"gpt-oss", "glm", "gemini"})
         else:
             active = set(DEFAULT_SOLVERS) | {JUDGE, AUDITOR}
         print(json.dumps(provider_coverage(active_families=active), indent=2))
@@ -103,7 +107,14 @@ def main(argv=None) -> int:
                 req=Requirements(reqdata.get("objective",question),
                     tuple(reqdata.get("constraints",[])),
                     tuple(reqdata.get("questions",[])))
-                runner=QuickCouncilRunner(transport,destination,budget,requirements=req)
+                allocation=metadata.get("role_assignment", {})
+                first=tuple(allocation.get("solvers",("gpt-oss",)))
+                runner=QuickCouncilRunner(
+                    transport,destination,budget,requirements=req,
+                    solver=first[0] if first else "gpt-oss",
+                    translator_family=allocation.get("translator","glm"),
+                    judge_family=allocation.get("judge","gemini"),
+                    solver_strategies=metadata.get("solver_strategies", {}))
             elif mode == "full":
                 from council.full import FullCouncilRunner
                 from council.requirements import Requirements
@@ -132,13 +143,16 @@ def main(argv=None) -> int:
     if args.deadline <= 0 or args.timeout <= 1:
         parser.error("Deadline and timeout must be positive")
     cfg = None
-    if args.mode == "full":
+    if args.mode in ("quick", "full"):
         from council.full import FULL_SOLVERS
         from council.config import load_config
         cfg = load_config(args.config) if args.config.is_file() else None
-        solvers = cfg.solvers if cfg else FULL_SOLVERS
+        configured = cfg.solvers if cfg else FULL_SOLVERS
+        if args.mode == "quick" and not configured:
+            parser.error("Quick mode requires at least one solver family")
+        solvers = configured[:1] if args.mode == "quick" else configured
     else:
-        solvers = DEFAULT_SOLVERS[:1] if args.mode == "quick" else DEFAULT_SOLVERS
+        solvers = DEFAULT_SOLVERS
     if args.dry_run:
         print(json.dumps({"mode": args.mode, "question": question,
                           "solvers": solvers,
@@ -193,7 +207,12 @@ def main(argv=None) -> int:
             from council.requirements import Requirements
             req=(Requirements.from_file(args.requirements_file)
                  if args.requirements_file else Requirements(question))
-            runner=QuickCouncilRunner(transport,events,budget,requirements=req)
+            runner=QuickCouncilRunner(
+                transport,events,budget,requirements=req,
+                solver=(cfg.solvers[0] if cfg else "gpt-oss"),
+                translator_family=(cfg.translator if cfg else "glm"),
+                judge_family=(cfg.judge if cfg else "gemini"),
+                solver_strategies=(cfg.solver_strategies if cfg else None))
         else:
             runner = CouncilRunner(transport, events, budget)
         try:

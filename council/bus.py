@@ -16,8 +16,24 @@ class Thread:
     verifier_calls: int = 0
     repairs: int = 0
     close_cause: str | None = None
+    duplicates: int = 0
 
 class MessageBus:
+    STALEMATE_CAUSES = frozenset({
+        "no_evidence_possible", "agents_gave_up", "cap_hit", "dedupe_dropped"
+    })
+
+    def close(self, claim_id: str, cause: str) -> None:
+        if cause not in self.STALEMATE_CAUSES:
+            raise ValueError("Unknown stalemate cause")
+        thread = self.threads.setdefault(claim_id, Thread(claim_id))
+        if thread.close_cause is None:
+            thread.close_cause = cause
+
+    def stalemates(self) -> dict[str, str]:
+        return {cid: thread.close_cause for cid, thread in self.threads.items()
+                if thread.close_cause is not None}
+
     def __init__(self, *, message_cap: int = 5, verifier_cap: int = 2,
                  repair_cap: int = 1, pair_cap: int = 3):
         self.threads: dict[str, Thread] = {}
@@ -45,6 +61,9 @@ class MessageBus:
             raise MessageCap("Message cap reached")
         fingerprint = self.fingerprint(msg)
         if fingerprint in thread.fingerprints:
+            thread.duplicates += 1
+            if thread.duplicates >= 2:
+                self.close(msg.thread, "dedupe_dropped")
             return "duplicate"
         if msg.act is Act.VERIFY_REQUEST:
             if thread.verifier_calls >= self.verifier_cap:

@@ -33,10 +33,19 @@ class Moderator:
         if not decision.acceptable:
             self.events("conformity_flag", claim_id=msg.thread, reason=decision.reason)
             return "rejected"
-        result = self.bus.deliver(msg)
+        try:
+            result = self.bus.deliver(msg)
+        except MessageCap:
+            self.events("stalemate", claim_id=msg.thread, cause="cap_hit")
+            raise
         if result == "duplicate":
             self.events("dedupe_dropped", claim_id=msg.thread, message_id=msg.id)
+            if self.bus.stalemates().get(msg.thread) == "dedupe_dropped":
+                self.events("stalemate", claim_id=msg.thread, cause="dedupe_dropped")
             return result
+        if msg.act is Act.ABSTAIN:
+            self.bus.close(msg.thread, "agents_gave_up")
+            self.events("stalemate", claim_id=msg.thread, cause="agents_gave_up")
         claim = self.ledger.claims[msg.thread]
         if decision.changes_claim and decision.target_status:
             if decision.target_status == "supported":

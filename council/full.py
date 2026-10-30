@@ -169,6 +169,13 @@ class FullCouncilRunner(CouncilRunner):
             "assumptions":claim.assumptions,
             "rule":"A check must match the meaning of the claim"})
         if not proposal:return
+        if proposal.get("rung") is None and not proposal.get("artifact"):
+            self.moderator.bus.close(claim.id, "no_evidence_possible")
+            self.events.record("stalemate", claim_id=claim.id,
+                               cause="no_evidence_possible")
+            self.extra_obligations.append(
+                claim.id + ": translator supplied no discriminating check")
+            return
         kind=proposal.get("claim_kind")
         scope=proposal.get("scope")
         artifact=proposal.get("artifact") or {}
@@ -343,6 +350,11 @@ class FullCouncilRunner(CouncilRunner):
         ])
         for (claim, hunter_family, round_number), result in zip(admissible, results):
             if not result or not result.get("found"):
+                if result is not None:
+                    self.moderator.bus.close(claim.id, "agents_gave_up")
+                    self.events.record("stalemate", claim_id=claim.id,
+                                       cause="agents_gave_up",
+                                       hunter_family=hunter_family)
                 continue
             detail = result.get("counterexample")
             if not isinstance(detail, str) or not detail.strip():
@@ -713,6 +725,7 @@ class FullCouncilRunner(CouncilRunner):
             "verdict":verdict,"composition":asdict(composition),
             "requirements":req.as_data(),"actual_models":self.actual_models,
             "duplicate_suggestions":self.duplicate_suggestions,
+            "stalemates":self.moderator.bus.stalemates(),
             "warnings":self.warnings}
         if hasattr(self.events,"db") and hasattr(self.events,"run_id"):
             SQLiteLedger(self.events.db).save(self.events.run_id,self.ledger)
@@ -725,9 +738,14 @@ class QuickCouncilRunner(FullCouncilRunner):
     No debate, repair, coverage or audit calls. A research sketch may still
     return unresolved; confidence must come from evidence rather than votes.
     """
-    def __init__(self,transport,events,budget,*,requirements=None):
+    def __init__(self,transport,events,budget,*,requirements=None,
+                 solver="gpt-oss", translator_family=TRANSLATOR,
+                 judge_family=JUDGE, solver_strategies=None):
         super().__init__(transport,events,budget,requirements=requirements,
-                         solvers=("gpt-oss",),max_claims=4,hunter_cap=0,
+                         solvers=(solver,),translator_family=translator_family,
+                         judge_family=judge_family,
+                         solver_strategies=solver_strategies,
+                         max_claims=4,hunter_cap=0,
                          enable_coverage=False,enable_relevance=False,
                          critics=(),adaptive_seeds=False,enable_repairs=False)
 

@@ -48,6 +48,7 @@ class Revision(ModelSchema):
     revised_claims:list[RevisedClaim]=Field(default_factory=list)
 
 class Translation(ModelSchema):
+    rung:int|None=None
     claim_kind:str|None=None
     scope:str|None=None
     artifact:dict=Field(default_factory=dict)

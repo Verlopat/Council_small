@@ -12,22 +12,22 @@ This table distinguishes **source code included** from **the behavior independen
 | 7: reservations | Cross-family claim reviews, judge family isolated, exact model identity | `assignment.py`, `transport.py`, `events.py` | **Implemented in allocated runs**, no claim of statistical independence |
 | 8: control plane | Single-writer moderator, flags, bounded reopens | `moderator.py`, `overseer.py` | **Partial**: state writes are by convention in the orchestrator; a formal single-writer process/isolation is not proven |
 | 8: quotas | FIFO token buckets, rate headers, three-failure breaker, per-day and shared limits | `quota.py`, `transport.py`, `router_health.py` | **Partial**: verified by offline mocks; real provider limits must be configured |
-| 8: deadlines | End-to-end budget and synthesis reserve | `budget.py`, `transport.py` | **Partial**: `asyncio.to_thread` cancellation cannot forcibly stop an in-flight synchronous request |
+| 8: deadlines | End-to-end budget, synthesis reserve, optional process termination | `budget.py`, `transport.py`, `process_infer.py` | **Partial**: hard-stop inference is opt-in; catalog discovery and target-machine cancellation still need testing |
 | 8: injection controls | User and agent text as data, system instructions separate, no tool permission from text | `prompts.py`, `model_router.py`, `transport.py` | **Partial**: this reduces confusion but cannot make prompt injection impossible |
-| 9: modes | Quick and full | `full.py`, `cli.py` | **Implemented in code**, live inference not tested in this development session |
+| 9: modes | Quick and full; quick family selection from YAML | `full.py`, `cli.py`, `config.py` | **Implemented in code**; configurable quick solver/translator/judge; live inference not independently checked |
 | 10: protocol | All named typed speech acts and scoped threads | `protocol.py`, `bus.py`, `moderator.py` | **Partial**: typed checks and caps work; fully asynchronous multi-round claim debates not yet empirically validated |
 | 10–11: evidence polarity | Claim/version-matched refs, no unsupported DEFEND/CONCEDE, evidence-gated rounds | `evidence.py`, `moderator.py` | **Implemented for local state updates**; semantic entailment still requires checking |
-| 11: caps and dedupe | Message, verifier, repair, pair caps, modal meaning preserved | `bus.py` | **Partial**: conservative text deduplication, not learned semantic equivalence |
+| 11: caps and dedupe | Message, verifier, repair, pair caps, four stalemate causes and dedupe | `bus.py`, `moderator.py`, `full.py` | **Implemented locally** with `cap_hit`, `dedupe_dropped`, `agents_gave_up`, `no_evidence_possible`; semantic dedupe remains conservative |
 | 12: claim states | Corrections: proposed, supported, contradicted, unresolved, withdrawn | `models.py` | **Implemented**; local status is scoped, not a universal proof |
 | 13: priority | Deterministic, reproducible choice of uncertain claims | `moderator.py` | **Partial**: precedence adapted to corrected statuses rather than old weak/strong |
-| 14: verifier ladder | Rung0 normalization; exact arithmetic; bwrap Python; SymPy; Z3; property/mutation tests; local source quotes; LLM relevance | `extract.py`, `translate.py`, `verify/` | **Partial**: sandbox and formal tool availability not confirmed on user host; natural-language translation needs independent alignment |
+| 14: verifier ladder | Rung0 normalization; exact arithmetic; bwrap Python; SymPy; Z3; property/mutation tests; local source quotes; LLM relevance | `extract.py`, `translate.py`, `verify/`, `requirements.txt` | **Dependencies declared** for SymPy and z3-solver; sandbox/formal-tool operation not yet validated on the target Linux host |
 | 14: mutation / false positives | Valid/invalid examples and mutants, no automatic universal proof | `verify/python_exec.py`, `verify/mutation.py` | **Implemented logic**, needs real adversarial verifier experiments |
 | 15: P0–P6 | Sealed solve, claim extraction, checking, hunts, repairs, blind judge, composition | `full.py`, `judge.py`, `compose.py` | **Partial**: P3/P4 are bounded first implementation, not full asynchronous debate |
 | 16–25: code skeletons | Main transport, families, quota, ledger, protocol, evidence, moderator, judge, composition, evaluator modules | `council/`, `eval/` | **Implemented by equivalent modules**, not always identical filenames; v4 snippets were only skeletons |
 | 26–27: prompts | Solver, extractor, translator, hunter, judge, structured JSON | `prompts.py`, `schemas.py` | **Implemented** with schema validation and fallback parsing |
 | 28: baselines | Single, six-family vote, self-consistency, verifier-selected best-of-N | `eval/baselines.py`, `eval/execute.py` | **Partial**: offline machinery exists; matched live call budgets and scientific outcomes not established |
 | 28–29: metrics | False verification, unresolved/no-op, costs, calibration, task-level bootstrap, threshold sweep | `eval/metrics.py`, `eval/parameter_sweep.py`, `eval/run_eval.py` | **Implemented metrics**, no empirical comparisons completed |
-| 29: sample grids | 30 original numeric/code/symbolic tasks per class, 3 runs, held-out split | `eval/generate_tasks.py`, `eval/phase_a.py` | **Implemented generator and plan**; execution on providers requires free API budget |
+| 29: sample grids | 30 numeric, code, symbolic tasks per kind per split and 30 research scenarios per split, six balanced categories | `eval/generate_tasks.py`, `eval/phase_a.py`, `eval/tasks/` | **Committed fixed-seed fixtures** for development and held-out; scoring and live evaluation still outstanding |
 | 29: weekly regression | 20 fixed scored prompts per endpoint; detect performance changes | `eval/regression_live.py`, `.github/workflows/regression.yml` | **Opt-in disabled by default** until provider keys/limits are confirmed |
 | 30: failure modes | Missing/invalid evidence, conformity, quotas, sandbox, model drift, overbuilding | Tests, `moderator.py`, `quota.py`, `verify/` | **Partial**: many safeguards are mocked, not independently penetration-tested |
 | 31: engineering extras | Pydantic, replay, private keys, response cache, independent tests | `schemas.py`, `replay.py`, `call_cache.py` | **Partial**: response replay is available; production pooling/parallel performance is not evaluated |
@@ -90,3 +90,19 @@ rather than left running as a Python thread. CI checks the selection route
 with mocks; the user host still needs a real network-fault timeout test.
 It does **not** bound catalog-discovery threads, prove sandbox confinement,
 or guarantee provider-side cancellation of a request already accepted.
+
+## Attached checklist remediation — 2026-10-30
+
+The following code changes are present in the new commit, with offline regression tests **added but not manually executed**, at the user's request.
+
+| Checklist item | Change | Confidence boundary |
+| --- | --- | --- |
+| 1. Verifier dependencies | Added `sympy>=1.13,<2` and `z3-solver>=4.13,<5` to `requirements.txt` | Installing packages and executing in bubblewrap on target machine are separate validations |
+| 2. Judge failure cause | Explicit `judge_error`, `composition_failure`, `deadline`, and `quota_contention` override generic `blocking_claims` | Cause does not change underlying unproved claims |
+| 3. Fallback event | `fallback_selected` records selected provider/model and earlier failed or skipped attempts | Includes no secret keys or inference proofs |
+| 4. Stalemate causes | Thread close reasons `no_evidence_possible`, `agents_gave_up`, `cap_hit`, `dedupe_dropped` appear in events and full results | A hunter's failure is not a mathematical counterexample or security proof |
+| 5. Configurable quick | Quick mode uses the first configured solver and configured translator/judge, including provider report and replay | Family reservation remains enforced; source configuration must be valid |
+| 6. Evaluation datasets | 30 synthetic research scenarios per split (5 of each M/P/L/C/V/O category) and 90 fixed-seed Phase-A tasks per split, with no intentional shared prompts or IDs | Research scenarios are synthetic; held-out data must not be tuned on; no empirical superiority asserted |
+| 7. Matrix | This matrix has been updated | A green CI build is not equivalent to proof correctness or live quota validation |
+
+The `research_cases.jsonl` short examples remain separately available. Formal corpus citations are not fabricated. The local paper index remains a provenance checker and not an automatic novelty oracle. **Manual test commands were intentionally not run in this update.** GitHub Actions may run automatically on a push.

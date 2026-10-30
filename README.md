@@ -190,3 +190,16 @@ The verifier sandbox still requires bubblewrap and must fail closed.
 All 159 tests (141 package + 18 legacy router) passed offline on the
 2026-10-30 main-branch CI. Live worker termination, live account quotas,
 and formal proof correctness remain external validation gates.
+
+## Checklist fixes and committed evaluation fixtures (2026-10-30)
+
+- SymPy and Z3 solver libraries are in `requirements.txt` for sandbox checkers.
+- Failure reasons from the judge are retained rather than overwritten by `blocking_claims`.
+- A same-family fallback logs `fallback_selected` with actual endpoint and skipped attempts.
+- Debate threads report four deterministic stalemate causes in event history and full output.
+- Quick mode respects the first YAML `solvers` entry and the configured translator/judge; the provider report and replay use the same assignment.
+- `eval/tasks/dev_research.jsonl` and `heldout_research.jsonl` contain **30 new synthetic scenarios each**, covering missing assumptions (M), invalid proofs (P), literature-overlap judgment (L), incompatible proposals (C), invalid criticisms (V), and open questions (O), five per category per split. Synthetic literature abstracts are explicitly hypothetical.
+- `eval/tasks/phase_a_dev.jsonl` and `phase_a_heldout.jsonl` contain **90 fixed-seed tasks each** (30 numeric, 30 code, 30 symbolic). `eval/generate_tasks.py` regenerates these deterministically.
+- New regression tests check failure causes, fallback events, stalemate handling, configurable quick mode and split independence. **The manual unittest commands were not run, as requested.** GitHub Actions can still run automatically on push.
+
+The remaining target-machine tasks—installing dependencies, verifying bubblewrap, confirming free API accounts, configuring real quotas, and performing held-out evaluations—are necessary to certify runtime or scientific results. These are not replaced by a successful source commit.
