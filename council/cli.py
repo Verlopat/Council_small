@@ -234,6 +234,11 @@ def main(argv=None) -> int:
         print("\nHypotheses:\n" + "\n".join("- " + x for x in brief["hypotheses"]))
         print("\nUnresolved reviewer objections:\n" + (
             "\n".join("- " + x for x in brief["unresolved_objections"]) or "(none)"))
+        advisory = result.get("advisory_findings", [])
+        print("\nAutomated security-game warnings (advisory only):\n" + (
+            "\n".join("- " + str(item.get("claim_id", "")) + ": " +
+                      str(item.get("message", "")) for item in advisory)
+            or "(none detected; this does not establish correctness)"))
         print("\nUnverified claims and proof obligations:\n" + (
             "\n".join("- " + x for x in brief.get("proof_obligations", []))
             or "(none)"))

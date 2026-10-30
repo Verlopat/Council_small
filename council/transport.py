@@ -83,8 +83,20 @@ class FamilyTransport:
             if allowed <= 1:
                 raise FamilyUnavailable(family, failures + ["deadline"])
             candidate = Candidate(entry.provider, entry.model)
-            # More room for claim spans; reserve tokens before opening a call.
-            output_tokens = 2800 if role == "proposal" else 1800
+            # Opt-in larger translator output allowance when a reasoning
+            # provider truncates responses. Default stays quota-conservative.
+            if role == "translate":
+                try:
+                    output_tokens=int(os.getenv(
+                        "COUNCIL_TRANSLATOR_MAX_TOKENS", "1800"))
+                except ValueError:
+                    raise ValueError(
+                        "COUNCIL_TRANSLATOR_MAX_TOKENS must be an integer") from None
+                if not 256 <= output_tokens <= 8192:
+                    raise ValueError(
+                        "COUNCIL_TRANSLATOR_MAX_TOKENS must be 256..8192")
+            else:
+                output_tokens = 2800 if role == "proposal" else 1800
             estimated_tokens=max(1,len(message)//3)+output_tokens
             try:
                 await self.quota.acquire(entry.provider, entry.model,

@@ -157,3 +157,44 @@ For formal cryptography, use `--mode full` and enough verified free
 provider quota for independent reviewers, translation and auditing.
 `--mode quick` skips independent critics, so "(none)" under reviewer
 objections must not be read as a security endorsement.
+
+## Security-game sanity checks and provider failures (October 2026)
+
+The Council may correctly return a **partial** research draft while the blind
+judge returns **unresolved**. These are different signals. Literal strings
+such as `"null"` from a judge are not substantive summaries; the Council
+retains the original solver proposal and records a judge/content warning
+instead of replacing that proposal with a `null` placeholder.
+
+If every endpoint for the same translator family fails or the model output
+cannot be parsed, later claims in **that run** are explicitly deferred
+instead of repeatedly sending the same role to the failed free-tier family.
+No previously unverified claim becomes supported. Translation still depends
+on a working Z.ai or Cloudflare account.
+
+When a translator reports `output_truncated` and you have confirmed enough
+free-token quota, you may explicitly raise only the translator's completion
+allowance:
+
+```bash
+COUNCIL_TRANSLATOR_MAX_TOKENS=2600 python -m council.cli --mode quick --deadline 180 \
+  "Specify a VRF security game"
+```
+
+The default remains 1800 tokens; supported range is 256–8192. Increasing
+the allowance may consume more of a free allowance and **cannot** fix
+timeouts, rate limits or incorrect semantics.
+
+For VRF questions, `council/vrf_sanity.py` performs conservative,
+deterministic **advisory** checks for a few explicit game-definition
+mistakes: revealing a valid challenge proof in pseudorandomness, replacing
+every evaluation-oracle response with random values, conflating full with
+trusted uniqueness, using a trapdoor oracle as the definition of trusted
+uniqueness, and using a second-valid-output forgery game as the definition
+of honest correctness. These are **not** model reviewers, proof checkers,
+or complete coverage; absence of flags is not evidence of correctness.
+The source distinction is explained in RFC 9381, Sections 3.1–3.4:
+https://www.rfc-editor.org/rfc/rfc9381.html
+
+The standalone offline unittest suite remains removed at the owner's
+request; these code changes require live owner-machine validation.

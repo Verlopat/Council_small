@@ -65,9 +65,14 @@ Return ONLY JSON: {"claim_kind":"...","scope":"...","assumptions":[],
 "artifact":{}}. For arithmetic use expression and expected int. For identity use left/right.
 For a program include a checker that emits final JSON pass, plus valid_examples,
 invalid_examples and limitation. A test does NOT prove a universal theorem.
-If no discriminating check exists, return
+If the claim is only a definition, a cryptographic security game,
+a purported reduction, a hardness assumption or an informal correctness
+theorem without an executable/formal artifact, no runnable check can
+automatically prove the assertion. Return exactly this concise JSON object:
 {"rung": null, "claim_kind": null, "scope": null, "artifact": {}}
-and clearly state unresolved; never invent verification results.""",
+Do not write free-text explanations or claim evidence was checked.
+Choose a verification artifact only if it genuinely decides the narrowly
+scoped claim. Keep the JSON small; avoid lengthy explanations.""",
       "hunter": """You are a cross-family adversarial counterexample hunter.
 Find a concrete input, derivation step or countermodel that could break the claim.
 Return ONLY JSON {"found":true|false,"counterexample":"...",

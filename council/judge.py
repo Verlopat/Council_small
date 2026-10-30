@@ -19,6 +19,17 @@ def blind_ledger(ledger: ClaimLedger, *, max_chars: int = 6500) -> str:
         raise ValueError("Ledger exceeds judge context; split into explicit sub-questions")
     return serialized
 
+def _substantive_text(value) -> str | None:
+    """A model's literal 'null' or 'none' is not a research summary."""
+    if not isinstance(value, str):
+        return None
+    cleaned = value.strip()
+    if not cleaned or cleaned.casefold() in {
+            "null", "none", "n/a", "undefined", "(none)", "no answer"}:
+        return None
+    return cleaned
+
+
 def enforce_verdict(proposed: dict, ledger: ClaimLedger) -> dict:
     wanted = proposed.get("status")
     if wanted not in {"answer", "unresolved"}:
@@ -29,15 +40,24 @@ def enforce_verdict(proposed: dict, ledger: ClaimLedger) -> dict:
         wanted = "unresolved"
     explicit = proposed.get("cause")
     hard_causes = {"judge_error", "composition_failure", "deadline", "quota_contention"}
+    answer = _substantive_text(proposed.get("answer"))
+    partial = _substantive_text(proposed.get("partial_answer")) or answer
+    # JSON shape validation alone does not make the string "null" useful.
+    if partial is None and wanted == "unresolved" and explicit is None:
+        explicit = "judge_error"
+    if answer is None and wanted == "answer":
+        wanted = "unresolved"
+        explicit = "judge_error"
     cause = (explicit if explicit in hard_causes else
              ("blocking_claims" if blocking else explicit))
     if explicit in hard_causes:
         wanted = "unresolved"
     return {"status": wanted,
-            "answer": proposed.get("answer") if wanted == "answer" else None,
-            "partial_answer": proposed.get("partial_answer") or proposed.get("answer"),
+            "answer": answer if wanted == "answer" else None,
+            "partial_answer": partial,
             "blocking": blocking, "basis": proposed.get("basis", []),
             "cause": cause}
+
 
 def judge_failure(ledger: ClaimLedger, partial: str = "") -> dict:
     return enforce_verdict({"status":"unresolved", "answer":None,

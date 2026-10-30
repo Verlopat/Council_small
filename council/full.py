@@ -27,6 +27,7 @@ from council.verify.ladder import verify
 from council.compose import compose_answer
 from council.workflow import CouncilRunner
 from council.requirements import Requirements
+from council.vrf_sanity import scan_vrf_games
 
 # Four-solvers variant would leave no reliable independently reserved auditing
 # family given the currently configured MiniMax limitation, so default to three.
@@ -84,6 +85,7 @@ class FullCouncilRunner(CouncilRunner):
         self.paper_index=paper_index
         self.checked_sources=set()
         self.extra_obligations=[]
+        self._translator_unavailable=False
         self.objections=[]
         self.author_responses=[]
 
@@ -191,6 +193,10 @@ class FullCouncilRunner(CouncilRunner):
                         dependent.id + ": dependency rejected (" + str(exc) + ")")
 
     async def _translate_and_check(self,claim:Claim):
+        if self._translator_unavailable:
+            self.extra_obligations.append(
+                claim.id+": translator unavailable after earlier failures in this run")
+            return
         if not claim.source_span:
             self.extra_obligations.append("Add an exact source span for "+claim.id)
             return
@@ -200,7 +206,17 @@ class FullCouncilRunner(CouncilRunner):
             "statement":claim.statement,"source_span":claim.source_span,
             "assumptions":claim.assumptions,
             "rule":"A check must match the meaning of the claim"})
-        if not proposal:return
+        if not proposal:
+            # A failing role is not retried for each remaining claim in the
+            # same run: the shared free-tier family has already exhausted its
+            # eligible fallback endpoints or returned invalid output.
+            self._translator_unavailable=True
+            self.events.record("role_disabled_for_run",role="translate",
+                               family=self.translator_family,
+                               reason="initial translator failed")
+            self.extra_obligations.append(
+                claim.id+": translator unavailable; independent verification deferred")
+            return
         if proposal.get("rung") is None and not proposal.get("artifact"):
             self.moderator.bus.close(claim.id, "no_evidence_possible")
             self.events.record("stalemate", claim_id=claim.id,
@@ -695,6 +711,11 @@ class FullCouncilRunner(CouncilRunner):
                     if (hunter := next((f for f in self.solvers
                                         if f != claim.owner_family), None))]
             await self._hunt_batch(jobs)
+        advisory_findings=scan_vrf_games(question,self.ledger.claims.values())
+        if advisory_findings:
+            self.events.record("advisory_game_red_flags",
+                findings=advisory_findings,
+                disclaimer="Heuristic checks; no independent proof or adjudication")
         brief=ResearchResult(research_question=question,
                              completion_status="partial")
         brief.hypotheses=list(dict.fromkeys(h for p in proposals for h in p["hypotheses"]))
@@ -721,6 +742,13 @@ class FullCouncilRunner(CouncilRunner):
         if any(c.source_span is None for c in open_claims):
             brief.next_actions.append(
                 "Supply verbatim claim quotations from the original proposal")
+        if advisory_findings:
+            brief.limitations.append(
+                "Automated VRF security-game checks found potential definition "
+                "errors; these are advisory flags, not verified counterexamples")
+            brief.next_actions.append(
+                "Review flagged game definitions against RFC 9381 sections 3.1, "
+                "3.3 and 3.4, then obtain independent cryptographic review")
         # Judge input is blind to authors, family IDs and raw model transcripts.
         try: ledger_view=blind_ledger(self.ledger)
         except ValueError:
@@ -736,10 +764,18 @@ class FullCouncilRunner(CouncilRunner):
         verdict=enforce_verdict(candidate or {"status":"unresolved",
             "partial_answer":brief.proposed_approach,"cause":"judge_error"},
             self.ledger)
-        if isinstance(verdict.get("partial_answer"),str):
-            brief.proposed_approach=verdict["partial_answer"]
+        partial=verdict.get("partial_answer")
+        if isinstance(partial,str) and partial.strip():
+            brief.proposed_approach=partial.strip()
+        else:
+            # Keep the original authored proposal instead of printing "null".
+            # Judge may be unresolved, but the draft still exists.
+            self.events.record("judge_partial_fallback",
+                               reason="missing_or_non_substantive_summary")
+            brief.limitations.append(
+                "Judge supplied no substantive summary; retained solver proposal")
         composition=compose_answer(
-            str(verdict.get("answer") or verdict.get("partial_answer") or ""),
+            str(verdict.get("answer") or brief.proposed_approach or ""),
             [c.id for c in self.ledger.claims.values()], self.ledger)
         if composition.blocking:
             brief.limitations.append(
@@ -763,7 +799,8 @@ class FullCouncilRunner(CouncilRunner):
         brief.proof_obligations=group_by_claim_id(
             brief.proof_obligations+
             [cid+": independent verification required"
-             for cid in verdict["blocking"]], self.ledger.claims)
+             for cid in verdict["blocking"]
+             if cid!="composition:1"], self.ledger.claims)
         audit=None
         if mode!="quick" and self.auditor_family is not None:
             audit=await self._call(self.auditor_family,"audit",{"question":question,
@@ -791,6 +828,7 @@ class FullCouncilRunner(CouncilRunner):
             "requirements":req.as_data(),"actual_models":self.actual_models,
             "duplicate_suggestions":self.duplicate_suggestions,
             "stalemates":self.moderator.bus.stalemates(),
+            "advisory_findings":advisory_findings,
             "warnings":self.warnings}
         if hasattr(self.events,"db") and hasattr(self.events,"run_id"):
             SQLiteLedger(self.events.db).save(self.events.run_id,self.ledger)
