@@ -1,1 +1,1 @@
-"""Offline evaluation utilities. No claims of measured superiority."""
+"""Equal-budget evaluation tools for the research council."""

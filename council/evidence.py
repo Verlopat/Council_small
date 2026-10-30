@@ -1,39 +1,70 @@
-"""Deterministic evidence-reference and polarity validation.
-
-A review is never equivalent to an independent failing check.
-"""
+"""Deterministic evidence checks. A failed proof is NOT a disproved theorem."""
 from __future__ import annotations
-from council.protocol import Act, Message
+from dataclasses import dataclass
 from council.models import Evidence, EvidenceKind, ClaimLedger
+from council.protocol import Act, Message
 
-def polarity_ok(message: Message, ledger: ClaimLedger, *,
-                owner_last_refs: frozenset[str] = frozenset(),
-                thread_refs: frozenset[str] = frozenset()) -> bool:
-    claim = ledger.claims.get(message.thread)
-    if claim is None:
-        return False
-    refs = [ledger.evidence.get(ref) for ref in message.evidence]
-    if any(r is None or r.claim_id != claim.id or r.claim_version != claim.version
-           for r in refs):
-        return False
-    verified = [r for r in refs if r is not None and r.independently_checked]
-    if message.act is Act.CONCEDE:
-        # A valid failing check contradicts only its stated scope, and a
-        # concession to a broken proof does not refute its conclusion.
-        return any(r.outcome == "fail" and r.id not in owner_last_refs
-                   for r in verified)
-    if message.act is Act.DEFEND:
-        return any(r.outcome == "pass" and r.id not in thread_refs
-                   for r in verified)
-    if message.act is Act.CHALLENGE:
-        # An actual independently checked failure or a *recorded* counterexample
-        # is required. A bare assertion is just an unverified objection.
-        return any(r.outcome == "fail" and r.kind in
-                   {EvidenceKind.TEST, EvidenceKind.COUNTEREXAMPLE,
-                    EvidenceKind.FORMAL_PROOF} for r in verified)
-    if message.act in (Act.WITHDRAW, Act.ABSTAIN, Act.REQUEST_EVIDENCE,
-                       Act.ASK, Act.ANSWER, Act.PROPOSE):
-        return True
-    if message.act in (Act.RESULT, Act.VERIFY_REQUEST, Act.REPAIR):
-        return bool(message.evidence)
-    return False
+class EvidenceRejected(ValueError):
+    pass
+
+@dataclass(frozen=True)
+class PolarityResult:
+    acceptable: bool
+    changes_claim: bool
+    reason: str
+    target_status: str | None = None
+
+def evaluate_polarity(msg: Message, ledger: ClaimLedger,
+                      *, prior_owner_evidence: set[str] | None = None) -> PolarityResult:
+    if msg.thread not in ledger.claims:
+        raise EvidenceRejected("Unknown thread/claim")
+    claim = ledger.claims[msg.thread]
+    referenced: list[Evidence] = []
+    for ref in msg.evidence:
+        item = ledger.evidence.get(ref)
+        if item is None:
+            raise EvidenceRejected("Evidence reference does not exist")
+        if item.claim_id != msg.thread or item.claim_version != claim.version:
+            raise EvidenceRejected("Evidence not scoped to this claim and version")
+        referenced.append(item)
+    used = prior_owner_evidence or set()
+    new = [e for e in referenced if e.id not in used]
+    if msg.act is Act.DEFEND:
+        if msg.sender_family != claim.owner_family:
+            raise EvidenceRejected("Only claim owner may defend")
+        if not any(e.independently_checked and e.outcome == "pass" and
+                   e.kind in {EvidenceKind.TEST, EvidenceKind.FORMAL_PROOF, EvidenceKind.SOURCE}
+                   for e in new):
+            return PolarityResult(False, False, "no new scoped passing evidence")
+        return PolarityResult(True, True, "bounded support", "supported")
+    if msg.act is Act.CONCEDE:
+        if msg.sender_family != claim.owner_family:
+            raise EvidenceRejected("Only claim owner may concede")
+        if not any(e.independently_checked and e.outcome == "fail" for e in new):
+            return PolarityResult(False, False, "pressure-only concession")
+        # A broken argument may leave a true statement; do NOT mark contradicted.
+        if any(e.kind is EvidenceKind.COUNTEREXAMPLE and e.independently_checked
+               and e.outcome == "fail" for e in new):
+            return PolarityResult(True, True, "validated counterexample", "contradicted")
+        return PolarityResult(True, True, "argument conceded, statement unresolved", "unresolved")
+    if msg.act is Act.CHALLENGE:
+        if msg.sender_family == claim.owner_family:
+            raise EvidenceRejected("A challenge must be cross-family")
+        genuine = any(e.independently_checked and e.outcome == "fail" for e in new)
+        # A step reference permits a challenge but is not independently validated.
+        if not genuine and not msg.step_ref:
+            return PolarityResult(False, False, "requires a step reference or failing evidence")
+        return PolarityResult(True, genuine, "challenge recorded; check its consequence",
+                              "contradicted" if any(e.kind is EvidenceKind.COUNTEREXAMPLE and
+                                e.independently_checked and e.outcome == "fail" for e in new)
+                              else "unresolved")
+    if msg.act is Act.WITHDRAW:
+        if msg.sender_family != claim.owner_family:
+            raise EvidenceRejected("Only claim owner can withdraw")
+        return PolarityResult(True, True, "owner withdrew claim", "withdrawn")
+    if msg.act is Act.RESULT:
+        # Only trusted verifier service may deliver RESULT.
+        if msg.sender_family != "verifier":
+            raise EvidenceRejected("LLM cannot certify verifier results")
+        return PolarityResult(True, False, "verified result must be recorded by verifier")
+    return PolarityResult(True, False, "non-decisive act")
