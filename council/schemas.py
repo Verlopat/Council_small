@@ -10,6 +10,7 @@ class ProposedClaim(ModelSchema):
     id:str=Field(min_length=1,max_length=160)
     statement:str=Field(min_length=1,max_length=10000)
     source_span:str|None=None
+    sentence_ids:list[int]=Field(default_factory=list)
     assumptions:list[str]=Field(default_factory=list)
     limitations:list[str]=Field(default_factory=list)
     depends_on:list[str]=Field(default_factory=list)

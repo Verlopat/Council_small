@@ -14,13 +14,14 @@ CLAIM = {
         "id": STRINGS,
         "statement": STRINGS,
         "source_span": STRINGS,
+        "sentence_ids": {"type": "array", "items": {"type": "integer"}},
         "assumptions": STRING_LIST,
         "limitations": STRING_LIST,
         "depends_on": STRING_LIST,
         "dependency_argument": STRINGS,
     },
     "required": [
-        "id", "statement", "source_span", "assumptions",
+        "id", "statement", "source_span", "sentence_ids", "assumptions",
         "limitations", "depends_on", "dependency_argument"
     ],
     "additionalProperties": False,

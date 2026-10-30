@@ -293,3 +293,41 @@ HTTP 402 (payment/free-credit required) blocks that provider for 24 hours
 instead of prompting automatic paid usage. These changes do not grant
 additional free allowance or fix exhausted daily quotas. They have not
 been live-tested with your provider credentials.
+
+## Quick-mode RFC index routing and sentence-source provenance
+
+As of the latest quick-mode fix, both ordinary `--mode quick` runs and
+`--recompute`/`--resume` quick evidence pipelines receive the optional
+`--paper-index`. Without this argument, provenance lookup appropriately
+reports `No local paper index supplied`. Run:
+
+```bash
+git pull origin main
+python -m council.rfc_index --db runs/papers.sqlite3
+python -m council.cli --mode quick --deadline 180 \
+  --paper-index runs/papers.sqlite3 \
+  "Explain full uniqueness, trusted uniqueness and pseudorandomness security games for a lattice-based VRF."
+```
+
+The default quick-mode verdict is **local policy**; it does not call Gemini.
+An unresolved composition therefore reports `composition_failure` (not
+`judge_error`). The generated research draft is still unverified.
+
+Groq proposals now include a `sentence_ids` array on each claim. The
+solver is prompted to write distinct source lines `[S1]`, `[S2]`, etc.
+If its prose quotation differs but the cited numbered lines exist, the
+coordinator extracts the **unaltered source text** and records sentence
+provenance. This is not proof that the *model-rewritten statement* means
+the same thing: the claim is flagged `needs_re_evaluation` and cannot
+be independently supported through the ordinary claim verifier until
+semantic alignment is resolved. Non-numbered output still uses the
+existing strict exact/formatting-only quotation locator.
+
+The VRF advisory checker additionally flags trusted uniqueness that
+substitutes compromised *other-identity* keys for the target secret key,
+and full uniqueness described as an entirely honest-key game. Per-claim
+warnings take precedence over duplicate approach-level warnings for the
+same issue. Absence of warnings is **not** a formal game verification.
+
+RFC heading matches establish only that the reference is available,
+not that the generated security game is semantically equivalent to it.

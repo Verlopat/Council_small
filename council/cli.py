@@ -114,7 +114,9 @@ def main(argv=None) -> int:
                     solver=first[0] if first else "gpt-oss",
                     translator_family=allocation.get("translator","glm"),
                     judge_family=allocation.get("judge","gemini"),
-                    solver_strategies=metadata.get("solver_strategies", {}))
+                    solver_strategies=metadata.get("solver_strategies", {}),
+                    paper_index=(PaperIndex(args.paper_index)
+                                 if args.paper_index else None))
             elif mode == "full":
                 from council.full import FullCouncilRunner
                 from council.requirements import Requirements
@@ -212,7 +214,8 @@ def main(argv=None) -> int:
                 solver=(cfg.solvers[0] if cfg else "gpt-oss"),
                 translator_family=(cfg.translator if cfg else "glm"),
                 judge_family=(cfg.judge if cfg else "gemini"),
-                solver_strategies=(cfg.solver_strategies if cfg else None))
+                solver_strategies=(cfg.solver_strategies if cfg else None),
+                paper_index=paper_index)
         else:
             runner = CouncilRunner(transport, events, budget)
         try:
@@ -229,14 +232,17 @@ def main(argv=None) -> int:
         if isinstance(verdict, dict):
             detail = verdict.get("cause")
             source = result.get("judge_source", "model")
-        label = ("Local evidence verdict" if source == "local_policy"
-                 else "Judge verdict")
-        print(label + ": " + str(verdict.get("status", "unresolved")) +
-              (" | cause: " + str(detail) if detail else ""))
+            label = ("Local evidence verdict" if source == "local_policy"
+                     else "Judge verdict")
+            print(label + ": " + str(verdict.get("status", "unresolved")) +
+                  (" | cause: " + str(detail) if detail else ""))
         print("\nProposed approach (solver original):\n" +
               (brief["proposed_approach"] or "(none)"))
         if brief.get("judge_summary"):
-            print("\nBlind judge summary (not the solver answer):\n" +
+            summary_label = ("Local evidence summary" if
+                             result.get("judge_source") == "local_policy"
+                             else "Blind judge summary")
+            print("\n" + summary_label + " (not the solver answer):\n" +
                   brief["judge_summary"])
         print("\nHypotheses:\n" + "\n".join("- " + x for x in brief["hypotheses"]))
         print("\nUnresolved reviewer objections:\n" + (

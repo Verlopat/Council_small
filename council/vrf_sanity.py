@@ -35,6 +35,30 @@ def scan_vrf_games(question: str, claims) -> list[dict]:
                           "oracle to define its two-output win condition.",
                 "reference":"RFC 9381 Sections 3.1–3.4"})
         if TRUSTED.search(text) and re.search(
+                r"\b(?:different|other)\s+(?:identit(?:y|ies)|"
+                r"instances?|secret\s+keys?|keys?)\b|"
+                r"\b(?:some|other)\s+keys?\s+but\s+not\s+"
+                r"(?:the\s+)?target",text,re.I):
+            findings.append({
+                "claim_id":cid,"kind":"trusted_uniqueness_wrong_key_target",
+                "message":"Trusted uniqueness must hold even when the "
+                          "adversary knows the target's honestly generated "
+                          "secret key. Knowledge of other identities' keys "
+                          "is not the defining experiment.",
+                "reference":"RFC 9381 Section 3.3"})
+        if FULL.search(text) and re.search(
+                r"\b(?:all|these|above)\s+(?:games|definitions)\b.{0,110}"
+                r"\bhonest[- ]key\b|"
+                r"\bfull\s+uniqueness\b.{0,180}"
+                r"\b(?:restricted to|defined for)\s+(?:the\s+)?honest[- ]key",
+                text,re.I):
+            findings.append({
+                "claim_id":cid,"kind":"full_uniqueness_honest_key_contradiction",
+                "message":"Full uniqueness must cover adversarially chosen "
+                          "public keys; describing all games as honest-key "
+                          "games contradicts this condition.",
+                "reference":"RFC 9381 Section 3.1"})
+        if TRUSTED.search(text) and re.search(
                 r"\bnever\s+(?:leaked|exposed|revealed|disclosed)\b|"
                 r"\b(?:kept|remains?)\s+secret\b|"
                 r"\bwithout\s+(?:access\s+to\s+|knowledge\s+of\s+|the\s+)"

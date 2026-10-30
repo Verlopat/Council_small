@@ -16,7 +16,7 @@ from council.assignment import Assignment
 from council.dependencies import Dependency
 from council.bus import MessageCap, MessageBus
 from council.evidence import EvidenceRejected
-from council.extract import validate_anchor, locate_source_span, suggest_duplicate_claims
+from council.extract import validate_anchor, locate_source_span, numbered_sentence_excerpt, suggest_duplicate_claims
 from council.judge import blind_ledger, enforce_verdict, judge_failure
 from council.ledger import SQLiteLedger
 from council.models import Claim, ClaimStatus, Evidence, EvidenceKind, ResearchResult, Objection, AuthorResponse
@@ -135,6 +135,22 @@ class FullCouncilRunner(CouncilRunner):
                             source_field=source_name)
                     break
             if anchored is None:
+                # Sentence IDs identify original source text deterministically.
+                # They DO NOT establish equivalence with the model's claim.
+                # Therefore the claim remains blocked for semantic alignment,
+                # and non-definition verification cannot certify it.
+                ids=raw.get("sentence_ids")
+                original=numbered_sentence_excerpt(p["approach"],ids) if isinstance(ids,list) else None
+                if original:
+                    claim.source_span=original
+                    claim.assumptions=assumptions
+                    claim.needs_re_evaluation=True
+                    self.events.record("claim_sentence_provenance",claim_id=cid,
+                        sentence_ids=ids,semantic_alignment="unchecked")
+                    self.extra_obligations.append(cid+
+                        ": numbered source sentences located; claimed meaning "
+                        "requires independent alignment review")
+                    continue
                 self.warnings.append(cid+": source anchoring failed ("+reason+")")
                 self.events.record("claim_anchor_rejected",claim_id=cid,
                                    reason=reason)
@@ -144,6 +160,17 @@ class FullCouncilRunner(CouncilRunner):
             claim.source_span=anchored.source_span
             claim.assumptions=list(anchored.assumptions)
             claim.quantifiers=list(anchored.quantifiers)
+            # A substring can establish quotation provenance without
+            # establishing the meaning of the model's rewritten claim.
+            # Never promote this into support if the claim is not itself
+            # contained verbatim (allowing only formatting equivalence).
+            if locate_source_span(anchored.source_span,claim.statement) is None:
+                claim.needs_re_evaluation=True
+                self.events.record("claim_semantic_alignment_unchecked",
+                                   claim_id=cid,source="quoted_span")
+                self.extra_obligations.append(
+                    cid+": quotation located, but the claim's rewritten "
+                    "meaning requires independent semantic alignment")
 
     def _register_declared_dependencies(self, proposal: dict, body: dict) -> None:
         """Only register provenance when the model supplies the actual argument.
@@ -216,6 +243,11 @@ class FullCouncilRunner(CouncilRunner):
                 (" reference heading located; meaning remains unverified"
                  if result["heading_found"] else
                  " not indexed; index the official RFC for provenance"))
+            return
+        if claim.needs_re_evaluation:
+            self.extra_obligations.append(
+                claim.id+": sentence provenance exists but claim-to-source "
+                "semantic alignment remains unchecked")
             return
         if self._translator_unavailable:
             self.extra_obligations.append(
@@ -745,10 +777,23 @@ class FullCouncilRunner(CouncilRunner):
                     if (hunter := next((f for f in self.solvers
                                         if f != claim.owner_family), None))]
             await self._hunt_batch(jobs)
-        advisory_findings=scan_vrf_games(
+        proposed_findings=scan_vrf_games(
             question, list(self.ledger.claims.values()) +
             [SimpleNamespace(id=p["id"]+":approach",statement=p["approach"])
              for p in proposals])
+        # Approach-level warnings are useful only for kinds not already
+        # attributed to an individual claim in the same proposal.
+        per_proposal_claim_kinds={}
+        for row in proposed_findings:
+            cid=row["claim_id"]
+            if ":approach" not in cid:
+                parent=cid.split(":")[0]
+                per_proposal_claim_kinds.setdefault(parent,set()).add(row["kind"])
+        advisory_findings=[
+            row for row in proposed_findings
+            if ":approach" not in row["claim_id"] or
+            row["kind"] not in
+                per_proposal_claim_kinds.get(row["claim_id"].split(":")[0],set())]
         if advisory_findings:
             self.events.record("advisory_game_red_flags",
                 findings=advisory_findings,
@@ -802,7 +847,9 @@ class FullCouncilRunner(CouncilRunner):
                      os.getenv("COUNCIL_QUICK_LLM_JUDGE","0")!="1")
         if local_judge:
             candidate={"status":"unresolved","blocking":[],
-                       "basis":["Deterministic local evidence policy"]}
+                       "basis":["Deterministic local evidence policy"],
+                       "partial_answer":brief.proposed_approach,
+                       "cause":"blocking_claims"}
             self.events.record("quick_judge_skipped",reason="save_free_tier_quota")
             brief.judge_summary=(
                 "Local evidence policy: claims require independently "
@@ -896,11 +943,12 @@ class QuickCouncilRunner(FullCouncilRunner):
     """
     def __init__(self,transport,events,budget,*,requirements=None,
                  solver="gpt-oss", translator_family=TRANSLATOR,
-                 judge_family=JUDGE, solver_strategies=None):
+                 judge_family=JUDGE, solver_strategies=None, paper_index=None):
         super().__init__(transport,events,budget,requirements=requirements,
                          solvers=(solver,),translator_family=translator_family,
                          judge_family=judge_family,
                          solver_strategies=solver_strategies,
+                         paper_index=paper_index,
                          max_claims=4,hunter_cap=0,
                          enable_coverage=False,enable_relevance=False,
                          critics=(),adaptive_seeds=False,enable_repairs=False)

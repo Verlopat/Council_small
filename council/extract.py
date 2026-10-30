@@ -144,6 +144,29 @@ def _locate_chars(source: str) -> tuple[str, list[tuple[int, int]]]:
     return "".join(packed), packed_offsets
 
 
+def numbered_sentence_excerpt(answer: str, sentence_ids: list[int]) -> str | None:
+    """Find exact original text from sequential [S1] labels.
+
+    Provenance only. This does not establish semantic alignment.
+    """
+    if (not sentence_ids or len(sentence_ids) > 8 or
+        any(type(i) is not int or i < 1 or i > 100 for i in sentence_ids) or
+        sentence_ids != list(range(sentence_ids[0], sentence_ids[-1]+1))):
+        return None
+    pattern = r"(?m)^\\s*\\[S([1-9][0-9]*)\\]\\s+"
+    tags = list(re.finditer(pattern, answer))
+    table = {}
+    for position, tag in enumerate(tags):
+        number = int(tag.group(1))
+        if number in table:
+            return None
+        stop = tags[position+1].start() if position+1 < len(tags) else len(answer)
+        table[number] = (tag.end(), stop)
+    if any(number not in table for number in sentence_ids):
+        return None
+    return answer[table[sentence_ids[0]][0]:table[sentence_ids[-1]][1]].strip()
+
+
 def locate_source_span(answer: str, span: str) -> str | None:
     """Find formatting-equivalent text and return original, unmodified bytes.
 

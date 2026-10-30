@@ -13,13 +13,15 @@ Follow the configured strategy in DATA_JSON: direct (reason stepwise), code
 subproblems and work backward). Never claim proposed code has run.
 Return ONE complete JSON object with required top-level keys:
 approach (nonempty string), claims (nonempty list), hypotheses (list of strings),
-experiments (list of strings). Every claim has keys id, statement,
-source_span, assumptions, limitations, depends_on, dependency_argument.
-All claim fields are required. To make claim provenance unambiguous,
-write each claim's complete statement VERBATIM somewhere in approach and set
-source_span to that exact statement, without changing any words, negations,
-modalities or quantifiers. Do not invent new claims or pretend the cited
-statement is proved by its presence in the approach.
+experiments (list of strings). Every claim has keys id, statement, source_span, sentence_ids,
+assumptions, limitations, depends_on, dependency_argument.
+All claim fields are required. Write the approach as short, clearly numbered
+lines: [S1] sentence text, [S2] sentence text, etc., each on a separate line.
+For each claim, set sentence_ids to the one-based number(s) of the source
+lines in approach and source_span to an exact sentence quote when possible.
+Never invent an ID or reword a quotation. The coordinator extracts source
+sentences itself: sentence_ids establish provenance only, NOT semantic
+equivalence or proof. Do not invent claims or evidence.
 Use [] for unused lists and "" for an unused dependency_argument.
 If you use depends_on, provide a concrete argument for the dependency.
 Claims must be atomic, and must not claim tests, formal proofs, or citations were
