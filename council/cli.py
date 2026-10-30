@@ -35,11 +35,29 @@ def main(argv=None) -> int:
     parser.add_argument("--dry-run", action="store_true",
                         help="Show role plan without API calls")
     parser.add_argument("--list-families", action="store_true")
+    parser.add_argument("--provider-report", action="store_true",
+                        help="Show all configured provider lineages and local free-key eligibility without API calls")
     parser.add_argument("--json", action="store_true", help="Print complete JSON results")
     args = parser.parse_args(argv)
     if args.list_families:
         for name, family in FAMILIES.items():
             print(name + ": " + ", ".join(e.provider + "/" + e.model for e in family.endpoints))
+        return 0
+    if args.provider_report:
+        from council.providers import provider_coverage
+        from council.config import load_config
+        if args.mode == "full":
+            selection = load_config(args.config) if args.config.is_file() else None
+            active = (set(selection.solvers) |
+                      {selection.translator, selection.judge, selection.auditor}
+                      if selection else
+                      {"gpt-oss", "command", "nemotron", "glm", "gemini", "gemma"})
+            active.update(selection.optional.get("critics", []) if selection else [])
+        elif args.mode == "quick":
+            active = {"gpt-oss", "glm", "gemini"}
+        else:
+            active = set(DEFAULT_SOLVERS) | {JUDGE, AUDITOR}
+        print(json.dumps(provider_coverage(active_families=active), indent=2))
         return 0
     if args.replay:
         db = args.run_dir / (args.replay + ".sqlite3")
@@ -114,9 +132,12 @@ def main(argv=None) -> int:
         solvers = DEFAULT_SOLVERS[:1] if args.mode == "quick" else DEFAULT_SOLVERS
     if args.dry_run:
         print(json.dumps({"mode": args.mode, "question": question,
-                          "solvers": solvers, "judge": JUDGE,
-                          "auditor": ("gemma" if args.mode == "full" else AUDITOR)
-                            if args.mode != "quick" else None,
+                          "solvers": solvers,
+                          "translator": cfg.translator if cfg else "glm",
+                          "judge": cfg.judge if cfg else JUDGE,
+                          "auditor": (cfg.auditor if cfg else "gemma")
+                            if args.mode == "full" else
+                            (AUDITOR if args.mode == "research" else None),
                           "deadline": args.deadline, "api_calls": 0}, indent=2))
         return 0
     run_id = args.run_id or uuid.uuid4().hex[:16]
