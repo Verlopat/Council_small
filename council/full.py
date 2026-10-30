@@ -41,7 +41,8 @@ class FullCouncilRunner(CouncilRunner):
                  translator_family=TRANSLATOR,judge_family=JUDGE,
                  auditor_family=AUDITOR,enable_coverage=True,
                  enable_relevance=False,critics=(),adaptive_seeds=False,
-                 enable_repairs=True, caps=None, paper_index=None):
+                 enable_repairs=True, caps=None, paper_index=None,
+                 solver_strategies=None):
         super().__init__(transport,events,budget,solvers=tuple(solvers))
         self.assignment=Assignment(tuple(solvers),translator=translator_family,
                                    judge=judge_family,auditor=auditor_family)
@@ -62,6 +63,14 @@ class FullCouncilRunner(CouncilRunner):
                          repair_cap=self.caps["repairs"],
                          pair_cap=self.caps["pair_exchanges"])
         self.moderator=Moderator(self.ledger,bus=bus,events=events.record)
+        defaults_strategies = {"gpt-oss":"direct", "command":"code",
+                               "nemotron":"decompose", "gemma":"code"}
+        self.solver_strategies = {
+            f: (solver_strategies or {}).get(f, defaults_strategies.get(f,"direct"))
+            for f in self.solvers}
+        if any(strategy not in {"direct","code","decompose"}
+               for strategy in self.solver_strategies.values()):
+            raise ValueError("Unsupported solver strategy")
         self.max_claims=max_claims
         self.hunter_cap=hunter_cap
         self.coverage=[]
@@ -361,13 +370,14 @@ class FullCouncilRunner(CouncilRunner):
         self.events.record("run_started",question=question,mode=mode,
             pipeline="evidence",
             requirements=req.as_data(),role_assignment=asdict(self.assignment),
-            debate_caps=self.caps,
+            debate_caps=self.caps, solver_strategies=self.solver_strategies,
             deadline_remaining=self.budget.remaining())
         proposals=[]
         raw=await asyncio.gather(*[
             self._call(family,"proposal",{
                 "question":question,"requirements":req.as_data(),
-                "independent":True,"source_spans_required":True})
+                "independent":True,"source_spans_required":True,
+                "strategy":self.solver_strategies[family]})
             for family in self.solvers])
         for index,(family,body) in enumerate(zip(self.solvers,raw),1):
             if body is None:continue
@@ -520,6 +530,7 @@ class FullCouncilRunner(CouncilRunner):
                 if self.budget.debate_remaining()<8:break
                 sample=await self._call(p["family"],"proposal",{
                     "question":question,"requirements":req.as_data(),
+                    "strategy":self.solver_strategies[p["family"]],
                     "independent":True,"source_spans_required":True})
                 if sample:
                     p["stability"]=("stable" if sample.get("approach")==p["approach"]

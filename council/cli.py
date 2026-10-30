@@ -118,6 +118,7 @@ def main(argv=None) -> int:
                     judge_family=allocation.get("judge","gemini"),
                     auditor_family=allocation.get("auditor","gemma"),
                     caps=metadata.get("debate_caps",{}),
+                    solver_strategies=metadata.get("solver_strategies",{}),
                     paper_index=(PaperIndex(args.paper_index)
                                  if args.paper_index else None))
             else:
@@ -141,6 +142,7 @@ def main(argv=None) -> int:
     if args.dry_run:
         print(json.dumps({"mode": args.mode, "question": question,
                           "solvers": solvers,
+                          "strategies": cfg.solver_strategies if cfg else None,
                           "translator": cfg.translator if cfg else "glm",
                           "judge": cfg.judge if cfg else JUDGE,
                           "auditor": (cfg.auditor if cfg else "gemma")
@@ -184,7 +186,8 @@ def main(argv=None) -> int:
                 critics=(tuple(cfg.optional.get("critics",[])) if cfg else ()),
                 adaptive_seeds=(cfg.optional.get("adaptive_seeds",False) if cfg else False),
                 enable_repairs=(cfg.optional.get("repair_round",True) if cfg else True),
-                caps=(cfg.caps if cfg else {}), paper_index=paper_index)
+                caps=(cfg.caps if cfg else {}), paper_index=paper_index,
+                solver_strategies=(cfg.solver_strategies if cfg else None))
         elif args.mode == "quick":
             from council.full import QuickCouncilRunner
             from council.requirements import Requirements
