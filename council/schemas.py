@@ -13,6 +13,7 @@ class ProposedClaim(ModelSchema):
     assumptions:list[str]=Field(default_factory=list)
     limitations:list[str]=Field(default_factory=list)
     depends_on:list[str]=Field(default_factory=list)
+    dependency_argument:str|None=None
 
 class Proposal(ModelSchema):
     approach:str=Field(min_length=1)

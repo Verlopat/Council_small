@@ -8,9 +8,9 @@ def prompt(role: str, payload: dict) -> str:
     instructions = {
       "proposal": """You are an independent research proposer. You have not seen other models.
 Produce a distinctive and falsifiable approach. Mark conjectures as hypotheses.
-Return ONLY JSON with keys: approach (string), claims (list of {id, statement, limitations}),
+Return ONLY JSON with keys: approach (string), claims (list of {id, statement, limitations, depends_on, dependency_argument, source_span}),
 hypotheses (list of strings), experiments (list of strings).
-Claims must be atomic, and must not claim tests, formal proofs, or citations were checked.""",
+Claims must be atomic, and must not claim tests, formal proofs, or citations were checked. Dependency IDs refer only to earlier claims in your own proposal. Include a specific dependency_argument, or do not claim a dependency.""",
       "review": """You are a skeptical cross-family reviewer. Find specific flaws, missing assumptions,
 counterexamples, proof gaps, and feasible ways to check them. Be precise, not rhetorical.
 Return ONLY JSON: { "objections": [ { "claim_id": "...", "issue": "...",

@@ -49,8 +49,11 @@ class DependencyGraph:
             if node==target:return True
             if node in seen:continue
             seen.add(node)
+            # Include provisional/inactive edges in cycle detection. An
+            # unsupported argument may later be independently confirmed;
+            # accepting a dormant cycle would make that transition unsafe.
             queue.extend(e.dependent_id for e in self.edges
-                         if e.valid_support and e.premise_id==node)
+                         if e.premise_id == node)
         return False
 
     def invalidate(self, premise_id: str) -> set[str]:

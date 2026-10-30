@@ -11,6 +11,7 @@ import json
 import time
 
 from council.assignment import Assignment
+from council.dependencies import Dependency
 from council.bus import MessageCap
 from council.evidence import EvidenceRejected
 from council.extract import validate_anchor
@@ -80,6 +81,59 @@ class FullCouncilRunner(CouncilRunner):
             claim.source_span=anchored.source_span
             claim.assumptions=list(anchored.assumptions)
             claim.quantifiers=list(anchored.quantifiers)
+
+    def _register_declared_dependencies(self, proposal: dict, body: dict) -> None:
+        """Only register provenance when the model supplies the actual argument.
+
+        Missing premises or argument text cannot be silently promoted into a
+        confirmed proof edge. Cycles and stale claim references are rejected by
+        DependencyGraph; no status is upgraded by a dependency alone.
+        """
+        claim_map = proposal["claim_map"]
+        try:
+            rows = item_list(body, "claims")
+        except OutputError:
+            return
+        for row in rows:
+            local_id = row.get("id")
+            if not isinstance(local_id, str) or local_id not in claim_map:
+                continue
+            dependent = self.ledger.claims[claim_map[local_id]]
+            references = row.get("depends_on", [])
+            if not isinstance(references, list) or any(
+                    not isinstance(ref, str) for ref in references):
+                self.warnings.append(dependent.id + ": malformed dependency list")
+                continue
+            if not references:
+                continue
+            argument = row.get("dependency_argument")
+            if not isinstance(argument, str) or not argument.strip():
+                self.extra_obligations.append(
+                    dependent.id + ": a dependency argument must be supplied")
+                continue
+            for ref in references:
+                premise_id = claim_map.get(ref)
+                if premise_id is None:
+                    self.warnings.append(
+                        dependent.id + ": unknown premise reference " + ref)
+                    continue
+                premise = self.ledger.claims[premise_id]
+                edge = Dependency(premise.id, premise.version,
+                                  dependent.id, dependent.version,
+                                  argument=argument.strip(),
+                                  valid_support=False)
+                # Declaration records a candidate argument, NOT valid support.
+                # Register as inactive until a qualified verifier confirms the edge.
+                try:
+                    self.ledger.register_dependency(edge)
+                    self.events.record("dependency_declared",
+                                       premise_id=premise.id, dependent_id=dependent.id,
+                                       premise_version=premise.version,
+                                       dependent_version=dependent.version,
+                                       valid_support=False)
+                except ValueError as exc:
+                    self.warnings.append(
+                        dependent.id + ": dependency rejected (" + str(exc) + ")")
 
     async def _translate_and_check(self,claim:Claim):
         if not claim.source_span:
@@ -297,6 +351,7 @@ class FullCouncilRunner(CouncilRunner):
             try:
                 p=self._proposal(family,body,index)
                 self._anchors(p,body)
+                self._register_declared_dependencies(p,body)
                 p["answer"]=body.get("answer") if isinstance(body.get("answer"),str) else p["approach"]
             except (OutputError,ValueError):
                 self.warnings.append(family+": proposal failed validation")
