@@ -6,6 +6,7 @@ Input is untrusted LLM output; all findings are advisory only.
 """
 from __future__ import annotations
 import re
+from council.definition_sources import topic_text
 
 VRF = re.compile(r"\bVRFs?\b|verifiable random function", re.I)
 PSEUDO = re.compile(r"pseudorandom|\bPRF\b", re.I)
@@ -22,7 +23,57 @@ def scan_vrf_games(question: str, claims) -> list[dict]:
         cid = getattr(claim, "id", "")
         if not isinstance(statement, str) or not isinstance(cid, str):
             continue
-        text = " ".join(statement.split())
+        text = topic_text(statement)
+        # RFC 9381 3.1 vs 3.2: uniqueness fixes ONE input and prohibits
+        # DIFFERENT outputs. A claim about different inputs with ONE output
+        # is collision resistance, regardless of whether it sounds plausible.
+        is_unique = FULL.search(text) or TRUSTED.search(text)
+        if is_unique:
+            different_inputs = re.search(
+                r"\b(?:two|2)\s+(?:distinct|different)\s+(?:VRF\s+)?inputs?\b"
+                r"|\b(?:distinct|different)\s+(?:VRF\s+)?inputs?\b", text, re.I)
+            same_output = re.search(
+                r"\b(?:same|identical|equal|matching)\s+(?:VRF\s+)?"
+                r"(?:hash\s+)?outputs?\b"
+                r"|\b(?:VRF\s+)?outputs?\b.{0,30}"
+                r"\b(?:same|identical|equal)\b", text, re.I)
+            if different_inputs and same_output:
+                findings.append({
+                    "claim_id":cid,
+                    "kind":"uniqueness_collision_resistance_conflation",
+                    "message":"This uniqueness claim describes distinct inputs "
+                              "yielding the same output: RFC 9381 Section 3.2 "
+                              "calls that collision resistance. Uniqueness "
+                              "(Sections 3.1/3.3) requires a common input "
+                              "and two distinct verified outputs.",
+                    "reference":"RFC 9381 Sections 3.1–3.3"})
+        if is_unique and re.search(
+                r"\b(?:trapdoor|secret\s+key)\b.{0,100}"
+                r"\bverif(?:y|ies|ication)\b|"
+                r"\bverif(?:y|ies|ication)\b.{0,100}"
+                r"\b(?:trapdoor|secret\s+key)\b",text,re.I):
+            findings.append({
+                "claim_id":cid,
+                "kind":"uniqueness_secret_verifier",
+                "message":"Public VRF verification is defined using the "
+                          "public key. This claim appears to use a secret "
+                          "trapdoor or key to verify outputs; inspect the "
+                          "verifier interface.",
+                "reference":"RFC 9381 Section 2"})
+        if PSEUDO.search(text) and re.search(
+                r"\brandom\s+(?:challenge\s+)?(?:point|input)\b",
+                text,re.I) and not re.search(
+                r"\badversar(?:y|ial)\b.{0,85}"
+                r"\b(?:choos|select|nominate)",text,re.I):
+            findings.append({
+                "claim_id":cid,
+                "kind":"pseudorandomness_random_target",
+                "message":"The game appears to sample a random challenge "
+                          "input; full VRF pseudorandomness allows the "
+                          "adversary to choose its target input adaptively. "
+                          "Selective security uses an earlier adversarial "
+                          "commitment, not a random target.",
+                "reference":"RFC 9381 Section 3.4"})
         # The game type can be valid even if the model uses signature
         # terminology; flag the ambiguity rather than silently equating APIs.
         if re.search(r"\bsigning\s+oracle\b",text,re.I) and (

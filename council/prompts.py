@@ -29,7 +29,12 @@ checked. Dependency IDs refer only to earlier claims in your own proposal.
 Do not return code fences, introductory prose or extra JSON keys.
 For cryptographic security games, explicitly state key generation, oracle
 access, challenge selection, forbidden oracle queries, and exactly what the
-challenge reveals. Distinguish honest-key from malicious-key threat models;
+challenge reveals. For VRFs: uniqueness forbids two DIFFERENT valid outputs
+for the SAME input and fixed public key; collision resistance forbids one
+valid output for DIFFERENT inputs. Full uniqueness permits malicious public
+keys; trusted uniqueness assumes honest key generation even if SK is known.
+VRF pseudorandomness provides only the challenge output, never its proof.
+Distinguish honest-key from malicious-key threat models;
 never assert that a specific hardness assumption proves a property without
 a construction-specific argument.""",
       "review": """You are a skeptical cross-family reviewer. Find specific flaws, missing assumptions,

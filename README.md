@@ -331,3 +331,29 @@ same issue. Absence of warnings is **not** a formal game verification.
 
 RFC heading matches establish only that the reference is available,
 not that the generated security game is semantically equivalent to it.
+
+## VRF uniqueness vs. collision resistance and Unicode labels
+
+The official RFC 9381 distinguishes different game properties:
+**full uniqueness** (Section 3.1) concerns different valid outputs for
+one fixed input and one public key; **full collision resistance**
+(Section 3.2) concerns the same valid output for two different inputs;
+**trusted uniqueness** (Section 3.3) is uniqueness under honestly generated
+keys. See https://www.rfc-editor.org/rfc/rfc9381.html#section-3.
+
+The source-definition classifier now treats `full-uniqueness`,
+`full‑uniqueness` (nonbreaking hyphen), and `full uniqueness` as the
+same *topic label*, including Unicode dash variants, without loosening
+claim-source quotation matching or mathematical verification.
+
+Quick-mode VRF advisories now flag claims that call a two-input/
+one-output collision a uniqueness attack, descriptions that appear to
+verify using secret trapdoors, and full-pseudorandomness games that
+randomize the challenge input rather than allowing adversarial target
+selection. These diagnostics cannot prove a construction correct or
+wrong by themselves.
+
+The quick local evidence summary remains a brief policy statement and
+is no longer overwritten with the full solver answer. The Council
+still treats unsound or unverified prose as partial/unresolved; RFC
+heading checks are source provenance, not semantic entailment.

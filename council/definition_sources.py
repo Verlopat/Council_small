@@ -4,6 +4,21 @@ Never convert a matched heading or source quote into verification of a claim.
 """
 from __future__ import annotations
 import re
+import unicodedata
+
+# Normalize *only* label formatting, not mathematical semantics. The
+# model often writes "full‑uniqueness" (nonbreaking hyphen) instead of
+# "full uniqueness", causing an expensive fallthrough to the translator.
+_TOPIC_DASHES = str.maketrans({ch: " " for ch in
+    "\u2010\u2011\u2012\u2013\u2014\u2212-"})
+
+
+def topic_text(value: str) -> str:
+    if not isinstance(value, str):
+        return ""
+    value = unicodedata.normalize("NFKC", value)
+    return " ".join(value.translate(_TOPIC_DASHES).casefold().split())
+
 
 DEFINITIONS = (
     ("full uniqueness", "Full Uniqueness", "3.1"),
@@ -15,7 +30,7 @@ DEFINITIONS = (
 def classify(question: str, statement: str) -> tuple[str, str] | None:
     if not re.search(r"\bvrf\b|verifiable random function", question, re.I):
         return None
-    text = " ".join(statement.lower().split())
+    text = topic_text(statement)
     if not re.search(r"\bgame\b|\bdefinition\b|\bdefines?\b", text):
         return None
     # Do not skip genuine claims about a proof, reduction or implementation.
@@ -29,7 +44,7 @@ def classify(question: str, statement: str) -> tuple[str, str] | None:
 
 
 def is_summary(statement: str) -> bool:
-    text = " ".join(statement.strip().lower().split())
+    text = topic_text(statement)
     return (text.startswith(("these definitions capture", "in summary,",
                              "overall, these definitions", "taken together,"))
             and sum(bool(term in text) for term in

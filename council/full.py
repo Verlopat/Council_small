@@ -865,7 +865,7 @@ class FullCouncilRunner(CouncilRunner):
         # A blind judge sees the claim ledger, not the author's complete prose.
         # Keep the original solver explanation as the proposed approach even
         # when the judge returns a valid but unhelpfully short summary.
-        if isinstance(partial,str) and partial.strip():
+        if not local_judge and isinstance(partial,str) and partial.strip():
             brief.judge_summary=partial.strip()
         elif not local_judge:
             self.events.record("judge_partial_fallback",
