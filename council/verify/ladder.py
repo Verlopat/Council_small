@@ -10,6 +10,7 @@ from council.verify.sympy_check import identity
 from council.verify.z3_check import unsatisfiable
 from council.verify.python_exec import evaluate_spec, CheckSpecification
 from council.verify.source import PaperIndex
+from council.verify.domain import check as domain_check
 
 @dataclass(frozen=True)
 class VerificationOutcome:
@@ -44,6 +45,24 @@ def verify(plan: VerificationPlan, artifact: dict, *,
             result = evaluate_spec(spec)
             return VerificationOutcome(result.outcome, "property_tests", plan.scope,
                                        digest, result.issue)
+        if plan.check_kind == "formal_proof_or_counterexample":
+            tool = artifact.get("tool")
+            source = artifact.get("source")
+            if tool not in {"lean", "tamarin", "proverif"}:
+                return VerificationOutcome(
+                    "unresolved", "formal_proof", plan.scope, digest,
+                    "A supported formal proof tool and exact formal source are required")
+            if not isinstance(source, str) or not source.strip():
+                return VerificationOutcome(
+                    "error", "formal_proof", plan.scope, digest,
+                    "Missing formal proof source")
+            result = domain_check(tool, source, timeout=30)
+            # This checks the submitted artifact, not its natural-language
+            # correspondence; CouncilRunner does not promote it to independent
+            # claim evidence without separate alignment.
+            return VerificationOutcome(
+                result.outcome, "formal_proof", plan.scope, digest,
+                result.limitation + "; natural-language translation not certified")
         if plan.check_kind == "source_passage":
             if paper_index is None:
                 return VerificationOutcome("unresolved", "source", plan.scope, digest,
