@@ -128,6 +128,10 @@ class QuotaScheduler:
 
     def failure(self, provider: str, model: str, *, kind: str,
                 retry_after: float | None = None) -> None:
+        # Local scheduling exhaustion, prompt length and rejected client input
+        # are not evidence that the provider endpoint is unhealthy.
+        if kind in {"quota_contention", "context_length", "request_invalid"}:
+            return
         state = self.state(provider, model)
         state.consecutive_failures += 1
         delay = retry_after if retry_after is not None else min(60.0, 2.0 ** state.consecutive_failures)
