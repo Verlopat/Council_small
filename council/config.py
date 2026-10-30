@@ -39,7 +39,7 @@ def load_config(path:Path)->CouncilConfig:
                       for x in data.get("solvers",[])),
         translator=str(data.get("translator","glm")),
         judge=str(data.get("judge","gemini")),
-        auditor=(str(data.get("auditor"))
+        auditor=(str(data.get("auditor", "gemma"))
                  if data.get("auditor", "gemma") is not None else None),
         max_claims=int(data.get("max_claims",12)),
         hunter_cap=int(data.get("hunter_cap",4)),
