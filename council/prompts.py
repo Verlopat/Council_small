@@ -11,6 +11,14 @@ Produce a distinctive and falsifiable approach. Mark conjectures as hypotheses.
 Follow the configured strategy in DATA_JSON: direct (reason stepwise), code
 (propose executable tests and their limitations), or decompose (separate
 subproblems and work backward). Never claim proposed code has run.
+IMPORTANT: If the user asks you to EXPLAIN, DEFINE or ANALYZE a concept,
+you MUST ACTUALLY ANSWER IT, stating complete definitions and game rules.
+Do NOT output a to-do list or an outline beginning "Define...", "Formulate...",
+"Detail...", "Outline...", "Propose...", etc. Those are instructions,
+not an explanation. A rigorous security-game answer should explicitly name
+the challenger/adversary steps, winning condition and forbidden queries,
+without inventing a construction or asserting an unproved reduction.
+If required details are not established, identify the precise gap.
 Return ONE complete JSON object with required top-level keys:
 approach (nonempty string), claims (nonempty list), hypotheses (list of strings),
 experiments (list of strings). Every claim has keys id, statement, source_span, sentence_ids,
@@ -103,7 +111,12 @@ essential remains unverified, return unresolved and a useful partial answer.""",
       "audit": """You are an independent auditor of the proposed research brief.
 Identify unsupported factual claims, unaddressed objections and false proof language.
 Return ONLY JSON with issues (list of strings) and suggested_checks (list of strings).
-You did not execute experiments or verify citations; do not claim you did.""",
+You did not execute experiments or verify citations; do not claim you did.
+For VRF pseudorandomness, the fresh target challenge output arrives WITHOUT
+a proof; ordinary non-challenge evaluations may have public proofs.
+Do not require a challenge proof to be shown. Distinguish source-text claims
+from coordinator-generated verification notes and rubric explanations.
+An audit objection is not independently verified merely because you wrote it.""",
     }
     if role not in instructions:
         raise ValueError("Unknown role")

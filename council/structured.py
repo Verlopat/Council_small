@@ -5,6 +5,7 @@ supports responseMimeType and responseSchema under generationConfig.
 Local schema and evidence checks always remain authoritative.
 """
 from __future__ import annotations
+import os
 
 STRINGS = {"type": "string"}
 STRING_LIST = {"type": "array", "items": {"type": "string"}}
@@ -57,8 +58,18 @@ GEMINI_JUDGE_SCHEMA = {
 }
 
 def response_format(provider: str, model: str, role: str) -> dict | None:
+    if provider == "Cohere":
+        # Chat v2: response_format={type:json_object,schema:...}
+        # Never interpret provider-side schema compliance as source verification.
+        if role == "proposal":
+            return {"type": "cohere_json", "schema": PROPOSAL_SCHEMA}
+        return {"type": "cohere_json"}
     if provider == "Gemini":
         if role == "judge":
+            # Diagnostic escape hatch: helps distinguish schema-triggered
+            # 5xx errors from provider-side outages. Local validation remains.
+            if os.getenv("COUNCIL_GEMINI_JUDGE_SCHEMA", "1") == "0":
+                return None
             return {"type": "gemini_response_schema",
                     "schema": GEMINI_JUDGE_SCHEMA}
         return None

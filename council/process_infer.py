@@ -42,7 +42,7 @@ def generate(provider: str, model: str, prompt: str, *,
              system_text: str | None, timeout: float,
              max_tokens: int = 1800,
              response_format: dict | None = None) -> tuple[str, dict | None]:
-    if not 0 < timeout <= 120 or not 1 <= max_tokens <= 8192:
+    if not 0 < timeout <= 120 or not 1 <= max_tokens <= 16384:
         raise ValueError("Invalid bounded process request")
     ctx = mp.get_context("spawn")
     receiving, sending = ctx.Pipe(duplex=False)

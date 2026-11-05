@@ -249,11 +249,14 @@ def main(argv=None) -> int:
         print("\nProposed approach (solver original):\n" +
               (brief["proposed_approach"] or "(none)"))
         if brief.get("judge_summary"):
-            summary_label = ("Local evidence summary" if
-                             result.get("judge_source") == "local_policy"
-                             else "Blind judge summary")
-            print("\n" + summary_label + " (not the solver answer):\n" +
-                  brief["judge_summary"])
+            source=result.get("judge_source")
+            if source=="unavailable":
+                print("\nJudge unavailable:\n" + brief["judge_summary"])
+            else:
+                summary_label = ("Local evidence summary" if
+                                 source == "local_policy" else "Blind judge summary")
+                print("\n" + summary_label + " (not the solver answer):\n" +
+                      brief["judge_summary"])
         print("\nHypotheses:\n" + "\n".join("- " + x for x in brief["hypotheses"]))
         print("\nUnresolved reviewer objections:\n" + (
             "\n".join("- " + x for x in brief["unresolved_objections"]) or "(none)"))
@@ -262,6 +265,11 @@ def main(argv=None) -> int:
             "\n".join("- " + str(item.get("claim_id", "")) + ": " +
                       str(item.get("message", "")) for item in advisory)
             or "(none detected; this does not establish correctness)"))
+        audit_advisories=result.get("audit_advisory_findings",[])
+        if audit_advisories:
+            print("\nAuditor security-game warnings (advisory only):\n" +
+                  "\n".join("- " + str(x.get("claim_id","")) + ": " +
+                            str(x.get("message","")) for x in audit_advisories))
         references = result.get("reference_checks", [])
         if references:
             print("\nLocal RFC source lookups (provenance only):\n" +

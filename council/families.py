@@ -6,6 +6,10 @@ from dataclasses import dataclass
 class Endpoint:
     provider: str
     model: str
+    # Per-endpoint overrides used by long-form reasoning providers.
+    # None inherits the caller's timeout and role-dependent token allowance.
+    timeout_seconds: float | None = None
+    max_tokens: int | None = None
 
 @dataclass(frozen=True)
 class Family:
@@ -17,8 +21,10 @@ FAMILIES: dict[str, Family] = {
     "gpt-oss": Family("gpt-oss", (Endpoint("Groq", "openai/gpt-oss-120b"),)),
     "command": Family("command", (Endpoint("Cohere", "command-a-plus-05-2026"),
                                   Endpoint("Cohere", "command-a-03-2025"))),
-    "nemotron": Family("nemotron", (Endpoint("OpenRouter", "nvidia/nemotron-3-ultra-550b-a55b:free"),
-                                    Endpoint("LLM7.io", "nemotron-3-nano:30b"))),
+    "nemotron": Family("nemotron", (Endpoint("OpenRouter", "nvidia/nemotron-3-ultra-550b-a55b:free",
+                                               timeout_seconds=100),
+                                    Endpoint("LLM7.io", "nemotron-3-nano:30b",
+                                             timeout_seconds=90, max_tokens=6000))),
     "gemma": Family("gemma", (Endpoint("Ollama Cloud", "gemma4:31b"),)),
     "gemini": Family("gemini", (Endpoint("Gemini", "gemini-3.6-flash"),
                                Endpoint("Gemini", "gemini-3.5-flash-lite"),

@@ -31,7 +31,8 @@ from council.compose import compose_answer
 from council.workflow import CouncilRunner
 from council.requirements import Requirements
 from council.vrf_sanity import scan_vrf_games
-from council.definition_sources import classify as definition_kind, consult as consult_definition, is_summary
+from council.vrf_audit import scan_audit_issues
+from council.definition_sources import classify as definition_kind, consult as consult_definition, is_summary, topic_text
 
 # Four-solvers variant would leave no reliable independently reserved auditing
 # family given the currently configured MiniMax limitation, so default to three.
@@ -403,6 +404,125 @@ class FullCouncilRunner(CouncilRunner):
         return (bool(match) and match.group(1).strip()==str(artifact.get("expression","")).strip()
                 and str(artifact.get("expected"))==match.group(2))
 
+    def _missing_solver_actions(self,proposals:list[dict])->list[str]:
+        present={p["family"] for p in proposals}
+        actions=[]
+        for family in self.solvers:
+            if family in present:
+                continue
+            matched=[row for row in self.warnings
+                     if row.startswith("proposal/"+family+":")]
+            reason=matched[-1].split(": ",1)[1] if matched else "no valid proposal returned"
+            if "unconfigured or free mode unconfirmed" in reason:
+                actions.append("Confirm usable free API access and credentials for "+
+                               family+" before attempting full mode")
+            elif "invalid structured output" in reason:
+                actions.append(f"{family}: structured proposal validation failed ("+
+                               reason[:180]+")")
+            elif "plan_not_answer" in reason:
+                actions.append(f"{family}: proposal only outlined tasks; "
+                               "an actual answer is required")
+            else:
+                actions.append(f"{family}: inference failed in this run ("+
+                               reason[:200]+"); inspect provider health and quota")
+        return actions
+
+    def _vrf_findings(self,question:str,proposals:list[dict])->list[dict]:
+        # Claims are primary. Only independently authored approach sentences
+        # that no claim anchors are checked as separate advisory surfaces.
+        claims=list(self.ledger.claims.values())
+        findings=scan_vrf_games(question,claims)
+        covered_kinds={(row["claim_id"].split(":")[0],row["kind"])
+                       for row in findings}
+        for p in proposals:
+            approach=p["approach"]
+            parts=[
+                (int(m.group(1)),m.group(2).strip())
+                for m in re.finditer(
+                    r"(?ms)^\s*\[S([0-9]+)\]\s+(.+?)(?=^\s*\[S[0-9]+\]|\Z)",
+                    approach)]
+            if not parts:
+                parts=[(i,chunk.strip()) for i,chunk in enumerate(
+                    re.split(r"(?<=[.!?])\s+",approach),1) if chunk.strip()]
+            for number,content in parts:
+                canonical=topic_text(content)
+                covered=False
+                for cid in p["claim_ids"]:
+                    source=self.ledger.claims[cid].source_span
+                    if source:
+                        excerpt=topic_text(source)
+                        if len(excerpt)>=24 and (excerpt in canonical or canonical in excerpt):
+                            covered=True
+                            break
+                if covered:
+                    continue
+                extra=scan_vrf_games(question,[SimpleNamespace(
+                    id=p["id"]+":approach:S"+str(number),statement=content)])
+                for item in extra:
+                    label=(p["id"],item["kind"])
+                    if label not in covered_kinds:
+                        findings.append(item)
+                        covered_kinds.add(label)
+        return findings
+
+    def _stop_for_independence(self,question:str,req:Requirements,
+                               proposals:list[dict])->dict:
+        self.events.record("run_stopped_early",
+            reason="insufficient_independence",valid_solver_count=len(proposals),
+            required_solver_count=2)
+        findings=self._vrf_findings(question,proposals)
+        for c in self.ledger.claims.values():
+            definition=definition_kind(question,c.statement)
+            if definition is not None:
+                heading,section=definition
+                check=consult_definition(self.paper_index,heading,section,c.id)
+                self.reference_checks.append(check)
+                self.events.record("definition_reference_checked",**check)
+        brief=ResearchResult(research_question=question,
+                             completion_status="unresolved")
+        brief.proposed_approach=(
+            "\n\n".join("Proposal "+p["id"]+" ("+p["family"]+"):\n"+
+                          p["approach"] for p in proposals))
+        brief.hypotheses=list(dict.fromkeys(h for p in proposals
+                                          for h in p["hypotheses"]))
+        brief.proof_obligations=group_by_claim_id(
+            self.extra_obligations+
+            [c.id+": "+c.statement+" (not independently established)"
+             for c in self.ledger.claims.values()],self.ledger.claims)
+        brief.limitations=[
+            "Insufficient independent proposals: "+str(len(proposals))+
+            "/"+str(len(self.solvers))+" configured solver families returned "
+            "valid structured proposals",
+            "Review, repair, model judgment and auditor calls skipped to avoid "
+            "expensive single-proposal full-mode execution"]
+        brief.next_actions=self._missing_solver_actions(proposals)+[
+            "Obtain at least two independent valid proposals before full review"]
+        if findings:
+            brief.limitations.append("Advisory VRF game warnings found; not verified counterexamples")
+        brief.limitations=list(dict.fromkeys(brief.limitations+self.warnings))
+        blocking=sorted(self.ledger.claims)
+        result={"research_result":brief.to_dict(),"proposals":proposals,
+            "claims":[asdict(c) for c in self.ledger.claims.values()],
+            "evidence":[asdict(e) for e in self.ledger.evidence.values()],
+            "objections":[],"author_responses":[],
+            "verdict":{"status":"unresolved","answer":None,"partial_answer":None,
+                       "blocking":blocking,"basis":["Fewer than two independent valid proposals"],
+                       "cause":"insufficient_independence"},
+            "requirements":req.as_data(),"actual_models":self.actual_models,
+            "advisory_findings":findings,"reference_checks":self.reference_checks,
+            "audit_advisory_findings":[],
+            "judge_source":"local_policy","role_coverage":{
+                "requested_solvers":list(self.solvers),
+                "valid_proposer_families":[p["family"] for p in proposals],
+                "review_objection_count":0,"independent_audit_completed":False,
+                "audit_family":self.auditor_family,
+                "stop_reason":"insufficient_independence"},
+            "warnings":self.warnings}
+        if hasattr(self.events,"db") and hasattr(self.events,"run_id"):
+            SQLiteLedger(self.events.db).save(self.events.run_id,self.ledger)
+        self.events.record("run_finished",result=result)
+        return result
+
     async def _extract_rival(self,owner,other_family):
         answer=owner.get("answer") or owner["approach"]
         result=await self._call(other_family,"extract",{
@@ -525,6 +645,11 @@ class FullCouncilRunner(CouncilRunner):
             proposals.append(p)
             self.events.record("proposal_received",proposal=p)
         # Sealed stage ends only after all proposal calls have returned.
+        # An isolated solver cannot constitute a full independent Council.
+        # Keep source diagnostics, but do not spend quota on peer review,
+        # revisions, repair, blind judge or final audit.
+        if mode=="full" and len(proposals)<2:
+            return self._stop_for_independence(question,req,proposals)
         if not proposals:
             result={"research_result":ResearchResult(question,completion_status="unresolved",
                     limitations=self.warnings).to_dict(),
@@ -778,34 +903,7 @@ class FullCouncilRunner(CouncilRunner):
                     if (hunter := next((f for f in self.solvers
                                         if f != claim.owner_family), None))]
             await self._hunt_batch(jobs)
-        # Inspect each numbered source sentence separately. Scanning a
-        # concatenated proposal can mix assumptions from distinct games.
-        approach_segments=[]
-        for p in proposals:
-            chunks=re.split(r"(?m)^\s*(?=\[S[0-9]+\])",p["approach"])
-            parts=[x.strip() for x in chunks if x.strip()]
-            if len(parts)<=1:
-                approach_segments.append(SimpleNamespace(
-                    id=p["id"]+":approach",statement=p["approach"]))
-            else:
-                for pos,part in enumerate(parts,1):
-                    approach_segments.append(SimpleNamespace(
-                        id=p["id"]+":approach:"+str(pos),statement=part))
-        proposed_findings=scan_vrf_games(
-            question, list(self.ledger.claims.values()) + approach_segments)
-        # Approach-level warnings are useful only for kinds not already
-        # attributed to an individual claim in the same proposal.
-        per_proposal_claim_kinds={}
-        for row in proposed_findings:
-            cid=row["claim_id"]
-            if ":approach" not in cid:
-                parent=cid.split(":")[0]
-                per_proposal_claim_kinds.setdefault(parent,set()).add(row["kind"])
-        advisory_findings=[
-            row for row in proposed_findings
-            if ":approach" not in row["claim_id"] or
-            row["kind"] not in
-                per_proposal_claim_kinds.get(row["claim_id"].split(":")[0],set())]
+        advisory_findings=self._vrf_findings(question,proposals)
         if advisory_findings:
             self.events.record("advisory_game_red_flags",
                 findings=advisory_findings,
@@ -837,9 +935,7 @@ class FullCouncilRunner(CouncilRunner):
                 "Reduced independent proposal coverage: "+
                 str(len(proposals))+"/"+str(len(self.solvers))+
                 " configured solver families returned valid proposals")
-            brief.next_actions.append(
-                "Restore missing independently reserved solver families using "
-                "confirmed free allowances before relying on full review")
+            brief.next_actions.extend(self._missing_solver_actions(proposals))
         if brief.proof_obligations:
             brief.next_actions.append(
                 "Check the listed claims against independent evidence before "
@@ -881,16 +977,28 @@ class FullCouncilRunner(CouncilRunner):
             # _call already retries a malformed judge response once.
             candidate=await self._call(
                 self.judge_family,"judge",judge_payload,synthesis=True)
+        judge_unavailable=(not local_judge and candidate is None)
+        if judge_unavailable:
+            failures=[w for w in self.warnings
+                      if w.startswith("judge/"+self.judge_family+":")]
+            reason=failures[-1].split(": ",1)[1] if failures else "no judge response"
+            brief.judge_summary="Judge unavailable ("+reason[:220]+"); no blind-judge response."
+            brief.limitations.append(
+                "Blind judge unavailable; no model judgment completed")
+            brief.next_actions.append(
+                "Inspect judge provider failures (HTTP status and retry mode) "
+                "before relying on a full-mode verdict")
         verdict=enforce_verdict(candidate or {"status":"unresolved",
-            "partial_answer":brief.proposed_approach,"cause":"judge_error"},
-            self.ledger)
+            "cause":"judge_error","basis":["Judge unavailable"],
+            "partial_answer":None},self.ledger)
         partial=verdict.get("partial_answer")
         # A blind judge sees the claim ledger, not the author's complete prose.
         # Keep the original solver explanation as the proposed approach even
         # when the judge returns a valid but unhelpfully short summary.
-        if not local_judge and isinstance(partial,str) and partial.strip():
+        if (not local_judge and not judge_unavailable
+                and isinstance(partial,str) and partial.strip()):
             brief.judge_summary=partial.strip()
-        elif not local_judge:
+        elif not local_judge and not judge_unavailable:
             self.events.record("judge_partial_fallback",
                                reason="missing_or_non_substantive_summary")
             brief.limitations.append(
@@ -923,14 +1031,44 @@ class FullCouncilRunner(CouncilRunner):
              for cid in verdict["blocking"]
              if cid!="composition:1"], self.ledger.claims)
         audit=None
+        audit_advisories=[]
         if mode!="quick" and self.auditor_family is not None:
-            audit=await self._call(self.auditor_family,"audit",{"question":question,
-                "requirements":req.as_data(),"blind_verdict":verdict,
-                "research_result":brief.to_dict()},synthesis=True)
+            # The auditor sees only model-authored research claims, source
+            # excerpts and scoped evidence. Coordinator obligation strings
+            # (e.g., "needs alignment review") must not be misattributed to
+            # the solver and cannot themselves become an audit criticism.
+            audit_material={
+                "research_question":question,
+                "proposed_approach":brief.proposed_approach,
+                "hypotheses":brief.hypotheses,
+                "claims":[{"id":c.id,"statement":c.statement,
+                           "source_span":c.source_span,
+                           "status":c.status.value,
+                           "evidence":[{"id":e.id,"kind":e.kind.value,
+                                        "outcome":e.outcome,
+                                        "independently_checked":e.independently_checked}
+                                       for eid in c.evidence_ids
+                                       if (e:=self.ledger.evidence.get(eid)) is not None]}
+                          for c in self.ledger.claims.values()
+                          if not c.id.startswith("composition:")],
+                "reviewer_objections":[{"id":o.id,"claim_id":o.claim_id,
+                                        "issue":o.issue}
+                                       for o in self.objections]}
+            audit=await self._call(self.auditor_family,"audit",{
+                "question":question,"requirements":req.as_data(),
+                "blind_verdict":{"status":verdict.get("status"),
+                                 "blocking":verdict.get("blocking",[])},
+                "research_result":audit_material},synthesis=True)
         if audit:
             try:
+                issues=string_list(audit,"issues")
+                audit_advisories=scan_audit_issues(question,issues)
+                if audit_advisories:
+                    self.events.record("audit_game_red_flags",
+                        findings=audit_advisories,
+                        disclaimer="Heuristic scope warnings; auditor claims remain unverified")
                 brief.unresolved_objections=list(dict.fromkeys(
-                     brief.unresolved_objections+string_list(audit,"issues")))
+                     brief.unresolved_objections+issues))
                 brief.proposed_experiments=list(dict.fromkeys(
                      brief.proposed_experiments+string_list(audit,"suggested_checks")))
             except OutputError:self.warnings.append("Audit output malformed")
@@ -939,9 +1077,18 @@ class FullCouncilRunner(CouncilRunner):
                 "Independent auditor not assigned" if self.auditor_family is None
                 else "Independent auditor unavailable; full-mode result lacks "
                      "the reserved independent audit stage")
-            brief.next_actions.append(
-                "Restore the reserved auditor using a confirmed free allowance "
-                "or treat this run as unaudited")
+            failures=[w for w in self.warnings
+                      if self.auditor_family and
+                      w.startswith("audit/"+self.auditor_family+":")]
+            reason=failures[-1].split(": ",1)[1] if failures else "no audit response"
+            if "unconfigured or free mode unconfirmed" in reason:
+                brief.next_actions.append(
+                    "Confirm an actual free allowance for the reserved auditor "+
+                    str(self.auditor_family)+" before enabling that provider")
+            else:
+                brief.next_actions.append(
+                    "Reserved auditor failed during this run ("+
+                    reason[:200]+"); check provider health or retry later")
         brief.completion_status=("partial" if proposals else "unresolved")
         brief.limitations=list(dict.fromkeys(brief.limitations+self.warnings))
         result={"research_result":brief.to_dict(),"proposals":proposals,
@@ -954,8 +1101,10 @@ class FullCouncilRunner(CouncilRunner):
             "duplicate_suggestions":self.duplicate_suggestions,
             "stalemates":self.moderator.bus.stalemates(),
             "advisory_findings":advisory_findings,
+            "audit_advisory_findings":audit_advisories,
             "reference_checks":self.reference_checks,
-            "judge_source":"local_policy" if local_judge else "model",
+            "judge_source":("local_policy" if local_judge else
+                            "unavailable" if judge_unavailable else "model"),
             "role_coverage":{"requested_solvers":list(self.solvers),
                 "valid_proposer_families":[p["family"] for p in proposals],
                 "review_objection_count":len(self.objections),

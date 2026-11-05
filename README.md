@@ -402,3 +402,81 @@ uniqueness. They also distinguish an honest-key-only statement from
 full uniqueness. These remain incomplete heuristic advisories; an
 absent warning or a model's reviewer objection does not constitute
 a cryptographic theorem or independent verification.
+
+## Provider resilience and guarded full-mode execution
+
+**Cohere Command / Chat v2:** Proposal requests now explicitly send the
+documented `response_format={"type":"json_object","schema":...}` schema.
+Local strict Pydantic validation still runs. For provider near-misses only,
+`approach` as a list of strings becomes a newline-joined string, and
+`assumptions`, `limitations`, `depends_on`, `hypotheses`, and
+`experiments` accept a single string as a one-item list. Other types still
+fail. The JSON Schema request follows the current official API docs:
+https://docs.cohere.com/v2/docs/structured-outputs .
+
+**Nemotron:** The allowlisted OpenRouter Ultra endpoint has a 100-second
+per-call allowance, while LLM7 Nano has 90 seconds and an initial
+6,000-token output allowance for proposals/repairs. An ordinary
+`--timeout 60` is a default; these explicit per-endpoint longer allowances
+take precedence when enough of the global deadline remains. A *completed*
+truncation on these roles can retry once using up to twice the prior
+output-token allowance (capped at 16,384), with another request reserved
+against the configured quota. Provider caps may be lower; an increased
+request is not guaranteed to succeed.
+
+**Transient errors:** A completed server, connection or timeout response
+may retry once when enough global deadline remains. Server retries pause
+4 seconds. For a Gemini judge 5xx error, the one retry removes the structured
+response schema as a diagnostic fallback. If all eligible judge endpoints
+fail, output says `Judge unavailable`, not an invented Gemini summary.
+The sanitized event log includes error kind and, when exposed by the
+HTTP adapter, numeric HTTP status. No raw error bodies are persisted.
+To disable Gemini's judge schema *from the initial request* for diagnosis:
+`COUNCIL_GEMINI_JUDGE_SCHEMA=0 python -m council.cli ...`.
+This option is NOT a way to bypass local validation or billable limits.
+
+**Insufficient independence:** When full mode receives fewer than two
+valid independent solver proposals, it returns
+`verdict.cause="insufficient_independence"` immediately after the sealed
+proposal stage. It preserves ledger claims, RFC provenance and advisory
+warnings but does **not** call the expensive review, repair, judge or
+audit stages. The next actions distinguish missing free-access
+confirmation, invalid proposal structure and provider inference failures.
+
+**Answer quality:** On explanatory tasks, a solver proposal consisting
+mostly of steps to do later (e.g. "Define...", "Outline...", "Propose...")
+is rejected with a bounded format retry. Neither plans nor simple provider
+agreements are counted as verified scientific results.
+
+**Auditor hygiene:** The auditor receives solver-authored propositions,
+source spans, evidence status and reviewer objections, not the
+coordinator's generated obligation explanations. Auditor VRF objections
+receive their own advisory sanity scan, including the difference between
+a public VRF proof for an ordinary input and the challenge output *without*
+a proof in RFC 9381 Section 3.4. Original objections are preserved; a
+sanity warning cannot by itself disprove the auditor.
+
+**VRF advisory deduplication:** Evaluate the structured claims first,
+then inspect only original approach sentences not covered by claim source
+anchors. Additional flags cover omitted secret-key knowledge in trusted
+uniqueness and an impossible pseudorandomness challenge asserted to occur
+"in each game." These checks are incomplete pattern matching, NOT formal
+security-game equivalence checking.
+
+For an offline-only provider readiness check:
+
+```bash
+python -m council.cli --provider-report --mode full
+```
+
+For a complete Council attempt after confirming actual free-provider access:
+
+```bash
+python -m council.cli --mode full --deadline 1200 --timeout 60 \
+  --paper-index runs/papers.sqlite3 \
+  "Explain full uniqueness, trusted uniqueness, and pseudorandomness security games for a lattice-based VRF."
+```
+
+The diagnostic run may legitimately stop with
+`insufficient_independence` or `unresolved`; that is preferable to
+spending quota while silently asserting unsupported proofs.

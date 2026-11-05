@@ -119,6 +119,40 @@ def scan_vrf_games(question: str, claims) -> list[dict]:
                           "under malicious key generation; that stronger "
                           "condition belongs to full uniqueness.",
                 "reference":"RFC 9381 Section 3.3"})
+        # A uniqueness experiment has no pseudorandomness challenge.
+        # Descriptions like "in each game the challenger selects a fresh
+        # challenge input" incorrectly apply the VRF PR game universally.
+        if re.search(r"\b(?:in|for)\s+(?:each|every|all)\s+(?:security\s+)?game\b",
+                     text,re.I) and re.search(r"\bchalleng(?:e|er)\b",text,re.I):
+            if re.search(r"\b(?:fresh|random|target|select|choos|input|proof)\b",
+                         text,re.I):
+                findings.append({
+                    "claim_id":cid,"kind":"vrf_challenge_in_every_game",
+                    "message":"This claim applies a challenge-input step to "
+                              "every VRF game. Uniqueness asks for two accepted "
+                              "outputs for one fixed input; the fresh target "
+                              "challenge belongs to pseudorandomness.",
+                    "reference":"RFC 9381 Sections 3.1, 3.3 and 3.4"})
+        if TRUSTED.search(text) and re.search(
+                r"\b(?:game|requires?|restricts?|assumes?|prohibits?|ensures?)\b",
+                text,re.I) and not re.search(
+                r"\b(?:secret\s+key|private\s+key|SK|trapdoor)\b",text,re.I):
+            findings.append({
+                "claim_id":cid,"kind":"trusted_uniqueness_sk_knowledge_unspecified",
+                "message":"Trusted uniqueness must hold for honestly "
+                          "generated PK/SK even when the adversary knows "
+                          "the target secret key. This claim does not "
+                          "specify that capability; check the complete game.",
+                "reference":"RFC 9381 Section 3.3"})
+        if re.search(r"\b(?:the|our)\s+(?:lattice\s+(?:based\s+)?)?"
+                r"(?:vrf\s+)?construction\s+uses?\b",text,re.I) and re.search(
+                r"\b(?:trapdoor|gaussian|rounding|sis|lwe)\b",text,re.I):
+            findings.append({
+                "claim_id":cid,"kind":"vrf_construction_not_identified",
+                "message":"The claim assigns concrete lattice mechanisms "
+                          "to an unspecified construction. Identify a scheme "
+                          "and evidence before accepting these primitives.",
+                "reference":"construction-specific evidence required"})
         # The game type can be valid even if the model uses signature
         # terminology; flag the ambiguity rather than silently equating APIs.
         if re.search(r"\bsigning\s+oracle\b",text,re.I) and (

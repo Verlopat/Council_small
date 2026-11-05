@@ -239,8 +239,8 @@ class Router:
         timeout = request_timeout if request_timeout is not None else (
             self.probe_timeout if probe else self.timeout)
         if max_output_tokens is not None and (type(max_output_tokens) is not int
-                                              or not 1 <= max_output_tokens <= 8192):
-            raise ValueError('max_output_tokens must be an integer from 1 to 8192')
+                                              or not 1 <= max_output_tokens <= 16384):
+            raise ValueError('max_output_tokens must be an integer from 1 to 16384')
         token_limit = 192 if probe else (max_output_tokens or 750)
         if probe:
             prompt = 'Hi. Reply with OK.'
@@ -290,19 +290,33 @@ class Router:
         elif provider == 'Cohere':
             # Cohere Chat v2 has its own response shape, distinct from OpenAI.
             # https://docs.cohere.com/reference/chat
+            payload = {
+                'model': model,
+                'messages': messages,
+                'max_tokens': token_limit,
+                'stream': False,
+            }
+            if response_format is not None:
+                if (probe or not isinstance(response_format,dict)
+                        or response_format.get('type') != 'cohere_json'):
+                    raise CandidateError('Unsupported Cohere format policy',
+                                         kind='request_invalid')
+                payload['response_format'] = {'type':'json_object'}
+                if 'schema' in response_format:
+                    if not isinstance(response_format['schema'],dict):
+                        raise CandidateError('Invalid Cohere JSON schema',
+                                             kind='request_invalid')
+                    payload['response_format']['schema'] = response_format['schema']
             result = api_call('POST', 'https://api.cohere.com/v2/chat',
-                              key=key,
-                              payload={
-                                  'model': model,
-                                  'messages': messages,
-                                  'max_tokens': token_limit,
-                                  'stream': False,
-                              },
-                              timeout=timeout)
+                              key=key,payload=payload,timeout=timeout)
             finish_reason = str(result.get('finish_reason') or '').upper()
-            if finish_reason in ('MAX_TOKENS', 'ERROR', 'TIMEOUT', 'TOOL_CALL'):
+            if finish_reason == 'MAX_TOKENS':
+                raise CandidateError('Cohere generation exceeded output allowance',
+                                     kind='output_truncated')
+            if finish_reason in ('ERROR', 'TIMEOUT', 'TOOL_CALL'):
                 raise CandidateError(f'Cohere generation did not finish: {finish_reason}',
-                                     kind='invalid_response')
+                                     kind=('timeout' if finish_reason=='TIMEOUT'
+                                           else 'invalid_response'))
             message = result.get('message') or {}
             if not isinstance(message, dict):
                 raise CandidateError('Malformed Cohere message', kind='invalid_response')

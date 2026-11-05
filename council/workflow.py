@@ -13,6 +13,7 @@ from council.models import (Claim, ClaimLedger, Objection, AuthorResponse,
 from council.parse import (OutputError, parse_object, require_string,
                            string_list, item_list)
 from council.prompts import prompt
+from council.plan_sanity import is_plan_instead_of_answer
 from council.schemas import validate as validate_output
 from council.transport import FamilyUnavailable
 
@@ -53,9 +54,10 @@ class CouncilRunner:
                     formatting = (
                         "Output ONE complete JSON object with nonempty approach, "
                         "at least one anchored claim, hypotheses and experiments. "
-                        "Every claim needs id, statement, source_span, assumptions, "
-                        "limitations, depends_on and dependency_argument. "
-                        "Source spans must be exact quotes from the approach. ")
+                        "Every claim needs id, statement, source_span, sentence_ids, "
+                        "assumptions, limitations, depends_on and dependency_argument. "
+                        "Use [S1], [S2] numbered source lines and real explanations; "
+                        "do not return a task list beginning Define/Outline/Propose. ")
                 else:
                     formatting = (
                         "Output ONE complete JSON object for the blind judge. "
@@ -84,7 +86,14 @@ class CouncilRunner:
                                        "model": response.model,
                                        "prompt_hash": response.prompt_hash})
             try:
-                return validate_output(role, parse_object(response.text))
+                validated=validate_output(role, parse_object(response.text))
+                if (role=="proposal" and
+                        is_plan_instead_of_answer(
+                            str(data.get("question","")),validated["approach"])):
+                    raise ValueError(
+                        "plan_not_answer: generated instructions instead of "
+                        "answering the research question")
+                return validated
             except (OutputError, ValueError) as error:
                 # Never print raw user prompts or provider text in diagnostics;
                 # output/schema error strings describe only parser constraints.

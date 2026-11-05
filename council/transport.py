@@ -73,13 +73,14 @@ class FamilyTransport:
         failures = []
         seen: set[tuple[str, str]] = set()
         for entry in endpoint_list(family):
+            endpoint_timeout = max(self.timeout, entry.timeout_seconds or 0)
             if not self._eligible(entry.provider):
                 failures.append(entry.provider + ": unconfigured or free mode unconfirmed")
                 continue
             if self.cache.blocked(entry.provider, entry.model):
                 failures.append(entry.provider + "/" + entry.model + ": cooldown")
                 continue
-            allowed = budget.allowed(self.timeout, synthesis=synthesis)
+            allowed = budget.allowed(endpoint_timeout, synthesis=synthesis)
             if allowed <= 1:
                 raise FamilyUnavailable(family, failures + ["deadline"])
             candidate = Candidate(entry.provider, entry.model)
@@ -97,8 +98,11 @@ class FamilyTransport:
                         "COUNCIL_TRANSLATOR_MAX_TOKENS must be 256..8192")
             else:
                 output_tokens = 2800 if role == "proposal" else 1800
+            if role in {"proposal", "repair"} and entry.max_tokens is not None:
+                output_tokens = max(output_tokens, entry.max_tokens)
             estimated_tokens=max(1,len(message)//3)+output_tokens
             retry_after = None
+            http_status = None
             try:
                 await self.quota.acquire(entry.provider, entry.model,
                     deadline=time.monotonic() + allowed,
@@ -111,7 +115,7 @@ class FamilyTransport:
                     raise CandidateError("Model not in permitted catalog", kind="model_unavailable")
                 seen.add((entry.provider, entry.model))
                 t0 = time.monotonic()
-                timeout = min(allowed, budget.allowed(self.timeout, synthesis=synthesis))
+                timeout = min(allowed, budget.allowed(endpoint_timeout, synthesis=synthesis))
                 if timeout <= 1:
                     raise TimeoutError()
                 sep = chr(10) + 'DATA_JSON:' + chr(10)
@@ -119,6 +123,7 @@ class FamilyTransport:
                     if message.startswith('SYSTEM ROLE:') and sep in message
                     else (None, message))
                 formatting = model_response_format(entry.provider, entry.model, role)
+                http_status = None
                 self.record("model_call_started", role=role, family=family,
                             provider=entry.provider, model=entry.model,
                             prompt_hash=hashlib.sha256(message.encode()).hexdigest())
@@ -141,32 +146,63 @@ class FamilyTransport:
                         return answer, (captured[-1] if captured else None)
                     finally:
                         RAW_CAPTURE.reset(token)
-                # Exactly one retry for a *completed* request that reported
-                # timeout. Do not retry asyncio.wait_for thread cancellation:
-                # that HTTP thread could still be running and duplicating a
-                # request would silently consume extra free-tier quota.
+                # One retry only after a *completed* provider request raises
+                # CandidateError. An asyncio.wait_for thread cancellation may
+                # leave a request running and must never trigger a duplicate.
                 for attempt_no in range(2):
                     try:
                         text, raw = await asyncio.wait_for(
                             asyncio.to_thread(infer), timeout=timeout)
                         break
                     except CandidateError as exc:
-                        if (exc.kind != "timeout" or attempt_no
-                                or budget.allowed(self.timeout, synthesis=synthesis) <= 5):
+                        transient=exc.kind in {"timeout", "server", "connection"}
+                        truncated=(exc.kind=="output_truncated" and
+                                   role in {"proposal","repair"} and
+                                   output_tokens < 16384)
+                        if attempt_no or not (transient or truncated):
                             raise
+                        delay=(4.0 if exc.kind=="server"
+                               else 2.0 if exc.kind=="connection"
+                               else 0.5 if exc.kind=="timeout" else 0.25)
+                        remaining=budget.allowed(endpoint_timeout,
+                                                 synthesis=synthesis)
+                        if remaining <= delay+6:
+                            raise
+                        if truncated:
+                            output_tokens=min(16384,output_tokens*2)
+                        elif (exc.kind=="server" and role=="judge"
+                              and entry.provider=="Gemini"
+                              and formatting is not None):
+                            # A schema-triggered 5xx is possible but NOT
+                            # established; one plain-JSON retry distinguishes
+                            # this from an endpoint outage without logging
+                            # response bodies or confidential model content.
+                            formatting=None
+                        safe_status=None
+                        try:
+                            import re
+                            matched=re.match(r"HTTP ([0-9]{3}):",str(exc))
+                            safe_status=int(matched.group(1)) if matched else None
+                        except (TypeError,ValueError):
+                            pass
                         self.record("model_call_retry",role=role,family=family,
-                                    provider=entry.provider,model=entry.model,
-                                    kind="timeout",attempt=2)
-                        await asyncio.sleep(0.5)
-                        remaining=budget.allowed(self.timeout,synthesis=synthesis)
-                        if remaining <= 4:
+                            provider=entry.provider,model=entry.model,
+                            kind=exc.kind,http_status=safe_status,
+                            attempt=2,delay_seconds=delay,
+                            max_output_tokens=output_tokens,
+                            formatting="none" if formatting is None else "structured")
+                        await asyncio.sleep(delay)
+                        remaining=budget.allowed(endpoint_timeout,
+                                                 synthesis=synthesis)
+                        if remaining<=5:
                             raise
-                        # A retry must reserve another request and tokens.
+                        # Every retry consumes a separately reserved request.
+                        estimated_tokens=max(1,len(message)//3)+output_tokens
                         await self.quota.acquire(
                             entry.provider, entry.model,
                             deadline=time.monotonic()+remaining,
                             expected_tokens=estimated_tokens)
-                        timeout=min(remaining, self.timeout)
+                        timeout=min(remaining,endpoint_timeout)
                 if not text.strip():
                     raise CandidateError("Empty response", kind="invalid_response")
                 elapsed = time.monotonic() - t0
@@ -211,6 +247,9 @@ class FamilyTransport:
             except CandidateError as exc:
                 kind = exc.kind
                 retry_after = exc.retry_after
+                import re
+                status_match = re.match(r"HTTP ([0-9]{3}):", str(exc))
+                http_status = int(status_match.group(1)) if status_match else None
             except (KeyError, TypeError, ValueError):
                 kind = "invalid_response"
             # No underlying exception content, URLs or keys are persisted.
@@ -221,7 +260,8 @@ class FamilyTransport:
             failures.append(entry.provider + "/" + entry.model + ": " + kind)
             self.record("model_call_failed", role=role, family=family,
                         provider=entry.provider, model=entry.model, kind=kind,
+                        http_status=http_status,
                         retry_after=retry_after)
-            if budget.allowed(self.timeout, synthesis=synthesis) <= 1:
+            if budget.allowed(endpoint_timeout, synthesis=synthesis) <= 1:
                 break
         raise FamilyUnavailable(family, failures)

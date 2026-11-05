@@ -6,6 +6,16 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 class ModelSchema(BaseModel):
     model_config=ConfigDict(extra="ignore",str_strip_whitespace=True)
 
+def _as_string_list(value):
+    # Only lossless container normalization. Arbitrary objects and nested
+    # values must still fail strict validation.
+    if value is None:
+        return []
+    if isinstance(value,str):
+        return [value] if value.strip() else []
+    return value
+
+
 class ProposedClaim(ModelSchema):
     id:str=Field(min_length=1,max_length=160)
     statement:str=Field(min_length=1,max_length=10000)
@@ -16,12 +26,32 @@ class ProposedClaim(ModelSchema):
     depends_on:list[str]=Field(default_factory=list)
     dependency_argument:str|None=None
 
+    @field_validator("assumptions", "limitations", "depends_on", mode="before")
+    @classmethod
+    def _listify(cls, value):
+        return _as_string_list(value)
+
+
 class Proposal(ModelSchema):
     approach:str=Field(min_length=1)
     answer:str|None=None
     claims:list[ProposedClaim]=Field(min_length=1)
     hypotheses:list[str]=Field(default_factory=list)
     experiments:list[str]=Field(default_factory=list)
+
+    @field_validator("approach", mode="before")
+    @classmethod
+    def _join_approach(cls, value):
+        if isinstance(value, list) and all(isinstance(item, str) for item in value):
+            # Preserve numbered source-line boundaries for exact provenance.
+            return "\n".join(value)
+        return value
+
+    @field_validator("hypotheses", "experiments", mode="before")
+    @classmethod
+    def _listify(cls, value):
+        return _as_string_list(value)
+
 
 class ReviewObjection(ModelSchema):
     claim_id:str=Field(min_length=1)
