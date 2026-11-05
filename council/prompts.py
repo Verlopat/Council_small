@@ -91,7 +91,9 @@ scoped claim. Keep the JSON small; avoid lengthy explanations.""",
       "hunter": """You are a cross-family adversarial counterexample hunter.
 Find a concrete input, derivation step or countermodel that could break the claim.
 Return ONLY JSON {"found":true|false,"counterexample":"...",
-"check_artifact":{},"tried":[]} and do not assert success without executed evidence.""",
+"check_artifact":{},"tried":["..."]}. counterexample MUST be a single
+string; tried MUST be a list of strings, not objects or nested arrays.
+Do not assert success without executed evidence.""",
       "coverage": """Identify which provided question requirements are not covered by
 the listed source-anchored claims. Return ONLY JSON {"missing_requirements":[...]}.
 A coverage opinion is advisory; it never certifies truth.""",
@@ -100,14 +102,34 @@ claim with the stated assumptions. Return ONLY JSON {"entails":true|false,
 "limitations":[...],"missing_assumptions":[...]}. This is an advisory model
 opinion, NOT a mechanized proof.""",
       "repair": """Repair exactly one specified claim, preserve quantifiers and
-other claims, and state any remaining obligations. Return ONLY JSON:
+other claims, and state any remaining obligations. DATA_JSON includes
+heuristic security-game warnings and sometimes a short verbatim RFC section
+excerpt. Address the warnings, cite the section correctly, and do not
+repeat known invalid assumptions (e.g. trusted-uniqueness key secrecy or
+challenge proofs in the pseudorandomness game). This is a proposed
+revision, not proof of correctness; the excerpt is provenance only.
+Return ONLY JSON:
 {"revised_statement":"...","assumptions":[],"proof_obligations":[]}.
 A revision does not automatically retain earlier verification.""",
-      "judge": """You see only a blind claim ledger with scoped verification results,
-not model identities or raw debate. Never override evidence policy. Return JSON:
+      "judge": """You see only a topic-grouped, compact BLIND claim ledger
+with scoped verification results, not model identities or raw debate.
+Read all_blocking_claim_ids and omitted_claim_ids: the compact view is NOT
+the full evidence record, and truncated statements must not be certified.
+The input may include verbatim RFC 9381 excerpts with section IDs and
+official source metadata. For EACH topic (full uniqueness, trusted
+uniqueness, pseudorandomness), compare the p1/p2/p3 claim versions to
+the relevant official excerpt. Identify which proposal's definition
+best matches the excerpt, or explicitly say NONE matches; explain
+concrete mismatches (keys, inputs, outputs, oracle, proof disclosure).
+Your comparison is an ADVISORY MODEL OPINION, not formally verified
+source entailment, security of any scheme, or permission to upgrade
+the ledger's supported/contradicted status. Never override evidence policy.
+Return JSON:
 {"status":"answer"|"unresolved","answer":null|string,
-"partial_answer":null|string,"blocking":[...],"basis":[...]}. If anything
-essential remains unverified, return unresolved and a useful partial answer.""",
+"partial_answer":null|string,"blocking":[...],"basis":[...]}.
+If any essential claim remains unverified or incomplete, status MUST be
+unresolved with a useful, qualified partial answer. Cite section IDs in
+basis for the comparison, not fabricated proof citations.""",
       "audit": """You are an independent auditor of the proposed research brief.
 Identify unsupported factual claims, unaddressed objections and false proof language.
 Return ONLY JSON with issues (list of strings) and suggested_checks (list of strings).

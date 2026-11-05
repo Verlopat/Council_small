@@ -98,7 +98,7 @@ class FamilyTransport:
                         "COUNCIL_TRANSLATOR_MAX_TOKENS must be 256..8192")
             else:
                 output_tokens = 2800 if role == "proposal" else 1800
-            if role in {"proposal", "repair"} and entry.max_tokens is not None:
+            if entry.max_tokens is not None:
                 output_tokens = max(output_tokens, entry.max_tokens)
             estimated_tokens=max(1,len(message)//3)+output_tokens
             retry_after = None

@@ -480,3 +480,53 @@ python -m council.cli --mode full --deadline 1200 --timeout 60 \
 The diagnostic run may legitimately stop with
 `insufficient_independence` or `unresolved`; that is preferable to
 spending quota while silently asserting unsupported proofs.
+
+## Compact judge comparisons and cleaner extraction (November 2026)
+
+A successful `--mode full` proposal stage may create more claims than a
+6,500-character blind ledger can contain. The blind judge now receives a
+topic-grouped, capped (12,000-character) presentation containing claim IDs,
+bounded statement text, verification status, scoped evidence summaries,
+advisory warning kinds, the *complete list* of blocking claim IDs, and
+explicitly listed omitted IDs when compression is necessary. The original
+ledger and evidence remain unchanged. If essential flagged records cannot
+fit, the judge is SKIPPED with `judge_input_too_large`; no placeholder text
+is passed off as the ledger.
+
+For VRF questions with the official `rfc9381` in
+`--paper-index`, the judge input additionally includes short **verbatim**
+excerpts from RFC 9381 Sections 3.1, 3.3, and 3.4, marked by section,
+source URL and document digest. The judge is instructed to compare the
+claim versions per topic and name the best textual match or *none*.
+**Neither an RFC heading lookup nor a model's comparison constitutes
+semantic verification, cryptographic security or proof of a lattice VRF.**
+
+The rival extractor records and skips clearly redundant source claims
+under the event `rival_claim_duplicate_skipped` and their original
+`duplicate_of` IDs; it does not merge evidence. Self-referential
+statements beginning "The answer", "The response", "The proposal" and
+similar phrases are removed from the verifier queue. Unnumbered and
+single-line `[S1] ... [S2] ...` plan lists are rejected when the user
+requested an explanation. A request-specific HTTP 400
+`request_invalid` does not poison the endpoint's persistent health, so
+an author's subsequent revision is not blocked by that health record.
+The underlying 400 still needs diagnosis; malformed inputs are not retried
+automatically as if they were provider outages.
+
+Nemotron endpoint token allowances also apply to **review** calls.
+Hunter near-miss JSON with object/list details is serialized without
+changing the values' meanings; model instructions still request a
+counterexample string and a string list of tried steps.
+
+VRF advisory checks now distinguish different *proofs* from different
+*VRF output values*, flag key-secrecy restrictions in trusted uniqueness,
+and flag pseudorandomness games that alter ordinary oracle answers or
+introduce unnecessary verification oracles. Both original solver source
+excerpts and condensed claims are checked for known mistakes without
+duplicating a warning kind within one proposal.
+
+Repair requests include the claim's applicable VRF warnings and, where
+available, the official bounded RFC excerpt. Repairs remain new,
+unverified claims. Auditor objections are also scanned for incorrect
+claims about secret-key secrecy and pseudorandomness challenge proofs;
+flags do not silently remove the objection.

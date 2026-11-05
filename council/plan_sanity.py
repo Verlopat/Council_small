@@ -6,7 +6,7 @@ from __future__ import annotations
 import re
 
 TASK_START=re.compile(
-    r"^(?:\[S\d+\]\s*)?(?:define|formulate|outline|detail|enumerate|list|"
+    r"^(?:\[S\d+\]\s*)?(?:define|describe|specify|formulate|outline|detail|enumerate|list|"
     r"summarize|propose|compare|identify|provide|state|critically evaluate|"
     r"develop|construct|explain how to)\b",re.I)
 REQUEST=re.compile(
@@ -22,7 +22,9 @@ def is_plan_instead_of_answer(question: str, approach: str) -> bool:
         return False
     if TASK_REQUEST.search(question):
         return False
-    lines=[line.strip() for line in approach.splitlines() if line.strip()]
+    # Providers may write [S1], [S2], [S3] on one physical line.
+    lines=[line.strip() for line in
+           re.split(r"\n+|(?=\[S\d+\])", approach) if line.strip()]
     # Do not reject one-sentence proposals or occasional legitimate
     # imperative wording in an otherwise substantive explanation.
     if len(lines)<3:

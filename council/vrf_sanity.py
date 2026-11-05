@@ -153,6 +153,65 @@ def scan_vrf_games(question: str, claims) -> list[dict]:
                           "to an unspecified construction. Identify a scheme "
                           "and evidence before accepting these primitives.",
                 "reference":"construction-specific evidence required"})
+        if is_unique:
+            # VRF uniqueness requires different verified output values, not
+            # merely different proofs of the same value.
+            distinct_proofs = re.search(
+                r"\b(?:two|2)\s+(?:syntactically\s+)?(?:distinct|different)"
+                r"\s+proofs?\b|"
+                r"(?:π|pi|proof)\s*[1₁]\s*(?:≠|!=|\\neq)\s*"
+                r"(?:π|pi|proof)\s*[2₂]",text,re.I)
+            distinct_values = re.search(
+                r"\b(?:two|2)\s+(?:distinct|different)\s+"
+                r"(?:valid\s+)?(?:vrf\s+)?(?:outputs?|values?)\b|"
+                r"(?:y|output)\s*[1₁]\s*(?:≠|!=|\\neq)\s*"
+                r"(?:y|output)\s*[2₂]",text,re.I)
+            if distinct_proofs and not distinct_values:
+                findings.append({
+                    "claim_id":cid,"kind":"uniqueness_on_proofs",
+                    "message":"Different proofs alone do not violate VRF "
+                              "uniqueness. The win condition needs TWO "
+                              "DIFFERENT OUTPUT VALUES that both verify "
+                              "for the same public key and input.",
+                    "reference":"RFC 9381 Sections 3.1 and 3.3"})
+        if TRUSTED.search(text) and re.search(
+                r"\bnever\s+(?:obtains?|learns?|gets?|receives?)\b.{0,45}"
+                r"(?:secret\s+key|\bsk\b)|"
+                r"\b(?:cannot|can\s+not|forbid\w*|prevent\w*)\b.{0,85}"
+                r"\b(?:learn\w*|obtain\w*|receive\w*)\b.{0,45}"
+                r"(?:secret\s+key|\bsk\b)|"
+                r"\baborts?\s+if\b.{0,100}(?:secret\s+key|\bsk\b)|"
+                r"\b(?:secret\s+key|\bsk\b)\b.{0,40}"
+                r"\b(?:never\s+(?:learned|revealed|known)|is\s+hidden)\b",
+                text,re.I):
+            findings.append({
+                "claim_id":cid,
+                "kind":"trusted_uniqueness_sk_secrecy_contradiction",
+                "message":"The claim incorrectly requires the target secret "
+                          "key to remain hidden. Trusted uniqueness must "
+                          "hold even if the adversary knows the honestly "
+                          "generated secret key.",
+                "reference":"RFC 9381 Section 3.3"})
+        if PSEUDO.search(text):
+            if re.search(r"\bverification\s+oracle\b",text,re.I):
+                findings.append({
+                    "claim_id":cid,"kind":"prf_verification_oracle",
+                    "message":"Public verification requires only pk and can be "
+                              "run locally. A special verification oracle is "
+                              "unnecessary and may signal a mis-specified game.",
+                    "reference":"RFC 9381 Sections 2 and 3.4"})
+            if (re.search(r"\boracle\b.{0,180}"
+                          r"(?:either|depending\s+on|if\s+b\s*=).{0,140}"
+                          r"(?:random|simulat|real\s+vrf)",text,re.I) or
+                re.search(r"\boracle\b.{0,150}"
+                          r"(?:random|simulat).{0,100}"
+                          r"(?:hidden\s+bit|depending|b\s*=)",text,re.I)):
+                findings.append({
+                    "claim_id":cid,"kind":"oracle_distribution_conflation",
+                    "message":"Ordinary VRF evaluation oracle outputs must "
+                              "remain REAL output-proof pairs in both worlds. "
+                              "Only the fresh challenge output is real-or-random.",
+                    "reference":"RFC 9381 Section 3.4"})
         # The game type can be valid even if the model uses signature
         # terminology; flag the ambiguity rather than silently equating APIs.
         if re.search(r"\bsigning\s+oracle\b",text,re.I) and (

@@ -90,6 +90,33 @@ class Hunter(ModelSchema):
     check_artifact:dict=Field(default_factory=dict)
     tried:list[str]=Field(default_factory=list)
 
+    @field_validator("counterexample", mode="before")
+    @classmethod
+    def _counterexample_string(cls, value):
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            return value
+        # Preserve the exact JSON payload: don't claim it was a string
+        # originally or invent a new counterexample.
+        if isinstance(value, (list,dict)):
+            import json
+            return json.dumps(value, ensure_ascii=False, sort_keys=True)
+        return value
+
+    @field_validator("tried", mode="before")
+    @classmethod
+    def _tried_strings(cls, value):
+        if value is None:
+            return []
+        if not isinstance(value,list):
+            value=[value]
+        import json
+        return [item if isinstance(item,str) else
+                json.dumps(item,ensure_ascii=False,sort_keys=True)
+                if isinstance(item,(dict,list)) else item
+                for item in value]
+
 class Judge(ModelSchema):
     status:Literal["answer","unresolved"]
     answer:str|None=None

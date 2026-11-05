@@ -126,7 +126,7 @@ class HealthCache:
 
     def failure(self, provider: str, model: str, kind: str,
                 quota_group: str | None = None, retry_after: float | None = None):
-        if kind in {"context_length", "quota_contention"}:
+        if kind in {"context_length", "quota_contention", "request_invalid"}:
             # Context constraints are specific to this prompt, not model health.
             return
         now = self.clock()

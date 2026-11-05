@@ -19,6 +19,7 @@ from council.bus import MessageCap, MessageBus
 from council.evidence import EvidenceRejected
 from council.extract import validate_anchor, locate_source_span, numbered_sentence_excerpt, suggest_duplicate_claims
 from council.judge import blind_ledger, enforce_verdict, judge_failure
+from council.claim_filter import is_meta_claim, close_to_owner
 from council.ledger import SQLiteLedger
 from council.models import Claim, ClaimStatus, Evidence, EvidenceKind, ResearchResult, Objection, AuthorResponse
 from council.obligations import group_by_claim_id
@@ -228,6 +229,11 @@ class FullCouncilRunner(CouncilRunner):
                         dependent.id + ": dependency rejected (" + str(exc) + ")")
 
     async def _translate_and_check(self,claim:Claim):
+        if is_meta_claim(claim.statement):
+            self.events.record("meta_claim_verification_skipped",claim_id=claim.id)
+            self.extra_obligations.append(
+                claim.id+": statement is about the answer, not the research question")
+            return
         if is_summary(claim.statement):
             self.events.record("redundant_summary_skipped",claim_id=claim.id)
             self.extra_obligations.append(
@@ -416,12 +422,12 @@ class FullCouncilRunner(CouncilRunner):
             if "unconfigured or free mode unconfirmed" in reason:
                 actions.append("Confirm usable free API access and credentials for "+
                                family+" before attempting full mode")
-            elif "invalid structured output" in reason:
-                actions.append(f"{family}: structured proposal validation failed ("+
-                               reason[:180]+")")
             elif "plan_not_answer" in reason:
                 actions.append(f"{family}: proposal only outlined tasks; "
                                "an actual answer is required")
+            elif "invalid structured output" in reason:
+                actions.append(f"{family}: structured proposal validation failed ("+
+                               reason[:180]+")")
             else:
                 actions.append(f"{family}: inference failed in this run ("+
                                reason[:200]+"); inspect provider health and quota")
@@ -434,6 +440,19 @@ class FullCouncilRunner(CouncilRunner):
         findings=scan_vrf_games(question,claims)
         covered_kinds={(row["claim_id"].split(":")[0],row["kind"])
                        for row in findings}
+        # A structured claim may paraphrase away an error present in its
+        # anchored original sentence. Check its provenance as a second,
+        # explicitly labeled advisory surface rather than silently declaring
+        # the original source sentence covered.
+        for c in claims:
+            if not c.source_span or topic_text(c.source_span)==topic_text(c.statement):
+                continue
+            for item in scan_vrf_games(question,[SimpleNamespace(
+                    id=c.id+":source",statement=c.source_span)]):
+                label=(c.id.split(":")[0],item["kind"])
+                if label not in covered_kinds:
+                    findings.append(item)
+                    covered_kinds.add(label)
         for p in proposals:
             approach=p["approach"]
             parts=[
@@ -536,13 +555,22 @@ class FullCouncilRunner(CouncilRunner):
         for entry in raws[:self.max_claims]:
             try:
                 statement=require_string(entry,"statement")
+                if is_meta_claim(statement):
+                    self.events.record("rival_meta_claim_skipped",
+                        proposal_id=owner["id"],statement_prefix=statement[:90])
+                    continue
                 span=require_string(entry,"source_span")
                 anchored=validate_anchor(answer,statement,span,
                            assumptions=string_list(entry,"assumptions"))
             except (OutputError,ValueError):
                 continue
-            if any(c.statement==statement and c.assumptions==list(anchored.assumptions)
-                   for c in self.ledger.claims.values()):
+            owned=[self.ledger.claims[cid] for cid in owner["claim_ids"]
+                   if cid in self.ledger.claims]
+            duplicate=close_to_owner(statement,anchored.source_span,owned)
+            if duplicate:
+                self.events.record("rival_claim_duplicate_skipped",
+                    proposal_id=owner["id"],duplicate_of=duplicate,
+                    similarity_policy="high_text_similarity_or_exact_source_coverage")
                 continue
             cid=owner["id"]+":r"+str(len(self.ledger.claims)+1)
             c=Claim(cid,1,statement,owner["family"],source_span=span,
@@ -627,13 +655,17 @@ class FullCouncilRunner(CouncilRunner):
             if body is None:continue
             if "VRF" in question.upper() or "verifiable random function" in question.lower():
                 distinct=[c for c in body.get("claims",[])
-                          if not is_summary(c.get("statement",""))]
+                          if not (is_summary(c.get("statement","")) or
+                                  is_meta_claim(c.get("statement","")))]
                 removed=len(body.get("claims",[]))-len(distinct)
                 if removed:
-                    self.events.record("summary_claims_filtered",
+                    self.events.record("summary_or_meta_claims_filtered",
                         family=family,removed=removed)
-                    if distinct:
-                        body=dict(body,claims=distinct)
+                    if not distinct:
+                        self.warnings.append(
+                            "proposal/"+family+": no substantive claims after filtering")
+                        continue
+                    body=dict(body,claims=distinct)
             try:
                 p=self._proposal(family,body,index)
                 self._anchors(p,body)
@@ -844,9 +876,22 @@ class FullCouncilRunner(CouncilRunner):
             repairer=next((f for f in ("nemotron","command","gpt-oss")
                            if f!=c.owner_family),None)
             if not repairer:continue
+            game_warnings=scan_vrf_games(question,[c])
+            definition=definition_kind(question,c.statement)
+            excerpt=None
+            if definition is not None and self.paper_index is not None:
+                try:
+                    excerpt=self.paper_index.rfc_section_excerpt(
+                        definition[1],max_chars=1000)
+                except (ValueError,AttributeError):
+                    excerpt=None
             suggestion=await self._call(repairer,"repair",{
                 "claim_id":c.id,"claim":c.statement,"assumptions":c.assumptions,
-                "obligations":self.extra_obligations})
+                "obligations":[v for v in self.extra_obligations
+                               if v.startswith(c.id+":")][:6],
+                "warnings":[{"kind":v["kind"],"message":v["message"]}
+                            for v in game_warnings],
+                "reference":excerpt})
             if not suggestion or not isinstance(suggestion.get("revised_statement"),str):
                 continue
             new_text=suggestion["revised_statement"].strip()
@@ -950,12 +995,35 @@ class FullCouncilRunner(CouncilRunner):
             brief.next_actions.append(
                 "Review flagged game definitions against RFC 9381 sections 3.1, "
                 "3.3 and 3.4, then obtain independent cryptographic review")
-        # Judge input is blind to authors, family IDs and raw model transcripts.
-        try: ledger_view=blind_ledger(self.ledger)
+        # Blind to model identities. Include complete blocker IDs and
+        # compact, topic-grouped claim views with explicit truncation flags.
+        warning_map={}
+        for row in advisory_findings:
+            key=row["claim_id"].split(":source")[0]
+            warning_map.setdefault(key,[]).append(row["kind"])
+        ledger_view=None
+        try:
+            ledger_view=blind_ledger(
+                self.ledger,max_chars=12000,warning_kinds=warning_map)
         except ValueError:
-            ledger_view="Ledger exceeds model context; deterministic partial required"
-            self.warnings.append("Ledger too long for blind judge")
+            self.warnings.append(
+                "Compact blind ledger still too large: skipping model judge "
+                "rather than supplying a deceptive placeholder")
+            self.events.record("judge_skipped",reason="judge_input_too_large")
+        rfc_excerpts=[]
+        if self.paper_index is not None and "vrf" in question.casefold():
+            for section in ("3.1","3.3","3.4"):
+                try:
+                    excerpt=self.paper_index.rfc_section_excerpt(
+                        section,max_chars=900)
+                except (AttributeError,ValueError):
+                    excerpt=None
+                if excerpt:
+                    rfc_excerpts.append(excerpt)
         judge_payload={"ledger":ledger_view,
+            "rfc_reference_excerpts":rfc_excerpts,
+            "reference_limitations":"Verbatim excerpts establish provenance, "
+                                   "not semantic entailment or construction security",
             "question_requirements":req.as_data(),
             "argument_map":[{"claim_id":x["claim_id"],"evidence_id":x["evidence_id"]}
                             for x in self.verified]}
@@ -973,15 +1041,20 @@ class FullCouncilRunner(CouncilRunner):
             brief.judge_summary=(
                 "Local evidence policy: claims require independently "
                 "scoped verification; quick mode has no peer reviewers.")
+        elif ledger_view is None:
+            candidate=None
         else:
             # _call already retries a malformed judge response once.
             candidate=await self._call(
                 self.judge_family,"judge",judge_payload,synthesis=True)
         judge_unavailable=(not local_judge and candidate is None)
+        judge_input_too_large=(not local_judge and ledger_view is None)
         if judge_unavailable:
             failures=[w for w in self.warnings
                       if w.startswith("judge/"+self.judge_family+":")]
-            reason=failures[-1].split(": ",1)[1] if failures else "no judge response"
+            reason=("compact ledger exceeds bounded model input"
+                    if judge_input_too_large else
+                    failures[-1].split(": ",1)[1] if failures else "no judge response")
             brief.judge_summary="Judge unavailable ("+reason[:220]+"); no blind-judge response."
             brief.limitations.append(
                 "Blind judge unavailable; no model judgment completed")
@@ -989,7 +1062,8 @@ class FullCouncilRunner(CouncilRunner):
                 "Inspect judge provider failures (HTTP status and retry mode) "
                 "before relying on a full-mode verdict")
         verdict=enforce_verdict(candidate or {"status":"unresolved",
-            "cause":"judge_error","basis":["Judge unavailable"],
+            "cause":("judge_input_too_large" if judge_input_too_large
+                     else "judge_error"),"basis":["Judge unavailable"],
             "partial_answer":None},self.ledger)
         partial=verdict.get("partial_answer")
         # A blind judge sees the claim ledger, not the author's complete prose.
@@ -1017,7 +1091,8 @@ class FullCouncilRunner(CouncilRunner):
                                blocking=list(composition.blocking),rung="prose")
             prior_cause=verdict.get("cause")
             cause=(prior_cause if prior_cause in
-                   {"judge_error","deadline","quota_contention"}
+                   {"judge_error","deadline","quota_contention",
+                    "judge_input_too_large"}
                    else "composition_failure")
             verdict=enforce_verdict(dict(verdict,status="unresolved",
                 cause=cause),self.ledger)
