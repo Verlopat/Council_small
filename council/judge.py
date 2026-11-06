@@ -162,7 +162,7 @@ def normalize_topic_judgment(topic: str, reference: dict, versions: list[dict],
     # An incomplete official reference is never enough to select a definitive
     # best version. An unquoted 'match' is downgraded above.
     selected=next((r for r in rows if r["id"]==best),None)
-    if not (source_complete and selected and
+    if not (source_complete and selected and selected["reference_quote"] and
             selected["status"] in {"matches","incomplete"}):
         best=None
     return {"topic":topic,"section":reference.get("section") if reference else None,
