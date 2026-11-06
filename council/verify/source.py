@@ -79,8 +79,8 @@ class PaperIndex:
                     "3.4": "Full Pseudorandomness"}
         title = headings[section]
         content = row[1]
-        pattern = (r"(?m)^[ \\t]*" + re.escape(section) +
-                   r"\\.[ \\t]+" + re.escape(title) + r"[ \\t]*$")
+        pattern = (r"(?m)^[ \t]*" + re.escape(section) +
+                   r"\.[ \t]+" + re.escape(title) + r"[ \t]*$")
         matches = list(re.finditer(pattern, content))
         if not matches:
             return None
@@ -88,7 +88,7 @@ class PaperIndex:
         heading = matches[-1]
         rest = content[heading.end():]
         next_section = re.search(
-            r"(?m)^[ \\t]*3\\.[0-9]+\\.[ \\t]+[A-Z][^\\r\\n]*$", rest)
+            r"(?m)^[ \t]*3\.[0-9]+\.[ \t]+[A-Z][^\r\n]*$", rest)
         end = (heading.end() + next_section.start()
                if next_section is not None else len(content))
         section_text = content[heading.start():end].strip()
