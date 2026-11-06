@@ -566,7 +566,7 @@ class FullCouncilRunner(CouncilRunner):
                 continue
             owned=[self.ledger.claims[cid] for cid in owner["claim_ids"]
                    if cid in self.ledger.claims]
-            duplicate=close_to_owner(statement,anchored.source_span,owned)
+            duplicate=close_to_owner(statement,owned)
             if duplicate:
                 self.events.record("rival_claim_duplicate_skipped",
                     proposal_id=owner["id"],duplicate_of=duplicate,
@@ -653,19 +653,22 @@ class FullCouncilRunner(CouncilRunner):
             for family in self.solvers])
         for index,(family,body) in enumerate(zip(self.solvers,raw),1):
             if body is None:continue
-            if "VRF" in question.upper() or "verifiable random function" in question.lower():
-                distinct=[c for c in body.get("claims",[])
-                          if not (is_summary(c.get("statement","")) or
-                                  is_meta_claim(c.get("statement","")))]
-                removed=len(body.get("claims",[]))-len(distinct)
-                if removed:
-                    self.events.record("summary_or_meta_claims_filtered",
-                        family=family,removed=removed)
-                    if not distinct:
-                        self.warnings.append(
-                            "proposal/"+family+": no substantive claims after filtering")
-                        continue
-                    body=dict(body,claims=distinct)
+            is_vrf=("vrf" in question.casefold() or
+                    "verifiable random function" in question.casefold())
+            # Self-referential claims are not domain claims for ANY question.
+            # Also omit generic VRF summary lines that duplicate real claims.
+            distinct=[c for c in body.get("claims",[])
+                      if not is_meta_claim(c.get("statement","")) and
+                      not (is_vrf and is_summary(c.get("statement","")))]
+            removed=len(body.get("claims",[]))-len(distinct)
+            if removed:
+                self.events.record("summary_or_meta_claims_filtered",
+                    family=family,removed=removed)
+                if not distinct:
+                    self.warnings.append(
+                        "proposal/"+family+": no substantive claims after filtering")
+                    continue
+                body=dict(body,claims=distinct)
             try:
                 p=self._proposal(family,body,index)
                 self._anchors(p,body)
@@ -882,7 +885,7 @@ class FullCouncilRunner(CouncilRunner):
             if definition is not None and self.paper_index is not None:
                 try:
                     excerpt=self.paper_index.rfc_section_excerpt(
-                        definition[1],max_chars=1000)
+                        definition[1],max_chars=2400)
                 except (ValueError,AttributeError):
                     excerpt=None
             suggestion=await self._call(repairer,"repair",{
@@ -1015,7 +1018,7 @@ class FullCouncilRunner(CouncilRunner):
             for section in ("3.1","3.3","3.4"):
                 try:
                     excerpt=self.paper_index.rfc_section_excerpt(
-                        section,max_chars=900)
+                        section,max_chars=6000)
                 except (AttributeError,ValueError):
                     excerpt=None
                 if excerpt:
