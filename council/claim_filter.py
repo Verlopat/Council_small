@@ -26,8 +26,14 @@ def close_to_owner(statement: str, owner_claims, *,
     normalized = topic_text(statement)
     if len(normalized) < 20:
         return None
+    # Negation flips are not safe near-duplicates even with high similarity.
+    negations = re.compile(r"\b(?:not|no|never|cannot|without|lacks?|forbidden)\b"
+                           r"|\bcan['’]t\b", re.I)
+    polarity = set(negations.findall(normalized))
     for claim in owner_claims:
         owner = topic_text(claim.statement)
+        if polarity != set(negations.findall(owner)):
+            continue
         score = SequenceMatcher(None, normalized, owner, autojunk=False).ratio()
         if score >= threshold:
             return claim.id
