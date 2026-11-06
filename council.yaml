@@ -13,7 +13,7 @@ auditor: gemma
 max_claims: 12
 hunter_cap: 4
 optional:
-  coverage_llm: true
+  coverage_llm: false
   relevance_check: false
   critics: []
   repair_round: true
