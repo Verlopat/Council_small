@@ -1,7 +1,11 @@
 """No API quota needed: check RFC topic judgments and objection triage."""
 import unittest
+import asyncio
 from types import SimpleNamespace
 from council.judge import TOPIC_SECTIONS, normalize_topic_judgment
+from council.claim_filter import close_to_owner
+from council.full import FullCouncilRunner
+from council.models import Claim, ClaimLedger, ClaimStatus
 from council.vrf_audit import classify_objections, objection_conflicts
 from council.vrf_sanity import scan_vrf_games
 from council.extract import numbered_sentence_excerpt
@@ -99,6 +103,54 @@ class ConsolidationTests(unittest.TestCase):
         kinds={v["kind"] for v in flags}
         self.assertNotIn("pseudorandomness_oracle_unspecified",kinds)
         self.assertNotIn("pseudorandomness_freshness_unspecified",kinds)
+
+
+    def test_full_runner_dispatches_all_three_games(self):
+        ledger=ClaimLedger()
+        ledger.add_claim(Claim("p1:c1",1,"Full uniqueness checks distinct outputs.","gpt-oss"))
+        ledger.add_claim(Claim("p2:c1",1,"Trusted uniqueness assumes honest keys.","command"))
+        ledger.add_claim(Claim("p3:c1",1,"Pseudorandomness challenge reveals only an output.","nemotron"))
+        calls=[]
+        async def fake_call(family,role,payload,*,synthesis=False):
+            calls.append((role,payload["topic"],payload["section"],synthesis))
+            return {"topic":payload["topic"],
+                    "versions":[{"id":v["id"],"status":"matches",
+                                 "reference_quote":"A matched reference",
+                                 "reason":"Matches the supplied words."}
+                                for v in payload["versions"]],
+                    "best_version_id":payload["versions"][0]["id"],
+                    "missing":[],"summary":"An advisory comparison."}
+        state=SimpleNamespace(
+            ledger=ledger,paper_index=SimpleNamespace(
+                rfc_section_excerpt=lambda section,max_chars:
+                {"section":section,"excerpt":"A matched reference",
+                 "truncated":False}),
+            judge_family="gemini",
+            budget=SimpleNamespace(debate_remaining=lambda:100),
+            events=SimpleNamespace(record=lambda *a,**k:None),
+            _call=fake_call)
+        results=asyncio.run(FullCouncilRunner._consolidate_topics(
+            state,QUESTION,[]))
+        self.assertEqual(len(results),3)
+        self.assertEqual([call[0] for call in calls],["topic_judge"]*3)
+        self.assertEqual([call[2] for call in calls],["3.1","3.3","3.4"])
+        self.assertTrue(all(result["best_version_id"] for result in results))
+        self.assertTrue(all(claim.status==ClaimStatus.PROPOSED
+                            for claim in ledger.claims.values()))
+
+    def test_near_identical_opposite_negations_are_not_deduplicated(self):
+        owner=SimpleNamespace(
+            id="p1:c2",statement="Trusted uniqueness allows knowledge "
+            "of the secret key for honestly generated keys.")
+        rival="Trusted uniqueness does not allow knowledge of the secret key for honestly generated keys."
+        self.assertIsNone(close_to_owner(rival,[owner],threshold=0.85))
+
+    def test_objection_topic_from_target_claim(self):
+        suspects=[{"id":"o1","source":"reviewer","topic":"2_trusted_uniqueness",
+                   "issue":"The adversary lacks the secret key."}]
+        flagged,others=classify_objections(QUESTION,suspects)
+        self.assertEqual([row["id"] for row in flagged],["o1"])
+        self.assertFalse(others)
 
 
 if __name__ == "__main__":
