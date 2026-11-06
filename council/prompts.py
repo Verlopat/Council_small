@@ -116,7 +116,9 @@ with scoped verification results, not model identities or raw debate.
 Read all_blocking_claim_ids and omitted_claim_ids: the compact view is NOT
 the full evidence record, and truncated statements must not be certified.
 The input may include verbatim RFC 9381 excerpts with section IDs and
-official source metadata. For EACH topic (full uniqueness, trusted
+official source metadata. Respect each excerpt's truncated flag: missing
+or partial reference material cannot justify an exhaustive comparison.
+For EACH topic (full uniqueness, trusted
 uniqueness, pseudorandomness), compare the p1/p2/p3 claim versions to
 the relevant official excerpt. Identify which proposal's definition
 best matches the excerpt, or explicitly say NONE matches; explain
