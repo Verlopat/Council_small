@@ -1209,6 +1209,24 @@ class FullCouncilRunner(CouncilRunner):
             try:
                 issues=string_list(audit,"issues")
                 audit_advisories=scan_audit_issues(question,issues)
+                existing={(row["claim_id"],row["kind"])
+                          for row in advisory_findings}
+                unique=[]
+                for row in audit_advisories:
+                    # Auditors may explicitly reference a model claim ID;
+                    # use it to avoid printing an already-known warning.
+                    ident=row["claim_id"]
+                    match=re.fullmatch(r"audit:([0-9]+)",ident)
+                    if match and int(match.group(1)) <= len(issues):
+                        cited=re.search(r"\bp[0-9]+:(?:c|r)[0-9]+(?::repair)?\b",
+                                        issues[int(match.group(1))-1])
+                        if cited and cited.group() in self.ledger.claims:
+                            row=dict(row,claim_id=cited.group())
+                    key=(row["claim_id"],row["kind"])
+                    if key not in existing:
+                        unique.append(row)
+                        existing.add(key)
+                audit_advisories=unique
                 if audit_advisories:
                     self.events.record("audit_game_red_flags",
                         findings=audit_advisories,
@@ -1238,6 +1256,8 @@ class FullCouncilRunner(CouncilRunner):
         # Categorize suspicious review/audit claims without throwing away
         # unverified objections or treating pattern matches as proofs.
         all_objections=[{"id":o.id,"claim_id":o.claim_id,"source":"reviewer",
+                         "topic":topic_of(self.ledger.claims[o.claim_id].statement)
+                         if o.claim_id in self.ledger.claims else "",
                          "issue":o.issue} for o in self.objections]
         all_objections += [{"id":"audit:"+str(i),"source":"auditor",
                             "issue":issue}
