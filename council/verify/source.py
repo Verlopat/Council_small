@@ -75,8 +75,8 @@ class PaperIndex:
         if not row or row[0] != "https://www.rfc-editor.org/rfc/rfc9381.txt":
             return None
         headings = {"3.1": "Full Uniqueness",
-                    "3.3": "Trusted Uniqueness",
-                    "3.4": "Full Pseudorandomness"}
+                    "3.3": "Trusted Uniqueness and Trusted Collision Resistance",
+                    "3.4": "Full Pseudorandomness or Selective Pseudorandomness"}
         title = headings[section]
         content = row[1]
         pattern = (r"(?m)^[ \t]*" + re.escape(section) +
