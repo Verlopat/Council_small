@@ -236,7 +236,9 @@ def main(argv=None) -> int:
                 best=row.get("best_version_id")
                 if best:
                     print("- "+topic+" [§"+str(row.get("section"))+"]: "+
-                          best+" — "+str(row.get("best_statement") or "")[:350])
+                          str(row.get("summary") or "")[:550])
+                    print("  Best source-aligned claim: "+best+" — "+
+                          str(row.get("best_statement") or "")[:220])
                 else:
                     print("- "+topic+": No source-aligned version selected "
                           "(reference or model comparison unavailable/incomplete).")
