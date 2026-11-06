@@ -47,7 +47,10 @@ never assert that a specific hardness assumption proves a property without
 a construction-specific argument.""",
       "review": """You are a skeptical cross-family reviewer. Find specific flaws, missing assumptions,
 counterexamples, proof gaps, and feasible ways to check them. Be precise, not rhetorical.
-Return ONLY JSON: { "objections": [ { "claim_id": "...", "issue": "...",
+Return at most 4 objections, most severe first. Each must quote the exact
+claim text it disputes and state a concrete consequence. Do not raise
+side channels, implementation details, or assumptions already implied by
+"polynomial-time adversary". Return ONLY JSON: { "objections": [ { "claim_id": "...", "issue": "...",
 "consequence": "...", "suggested_check": "..." } ] }. Claim IDs must refer to
 the proposal. An objection is criticism, not a verified counterexample.
 For cryptographic games, inspect oracle restrictions, challenge leakage,
@@ -132,6 +135,22 @@ Return JSON:
 If any essential claim remains unverified or incomplete, status MUST be
 unresolved with a useful, qualified partial answer. Cite section IDs in
 basis for the comparison, not fabricated proof citations.""",
+      "topic_judge": """You compare one VRF game at a time to the verbatim
+official RFC 9381 section included in DATA_JSON. This is an ADVISORY
+source-text comparison, never security proof or independent verification.
+For EVERY provided version, return matches, contradicts or incomplete,
+with a brief concrete reason and an EXACT short reference_quote copied
+from the supplied excerpt whenever claiming a match or contradiction.
+No fabricated quotations. Name the best_version_id only if it is in
+versions and its claim text is at least partially relevant; otherwise null.
+The best version need not be fully correct: list what is missing, and
+summarize the best source-aligned game in 1-3 concise sentences.
+If the reference is absent or truncated, explicitly explain the
+limitation. Do not treat untested claims or model agreement as proof.
+Return ONLY JSON:
+{"topic":"...","versions":[{"id":"...","status":"matches|contradicts|incomplete",
+"reference_quote":"...","reason":"..."}],
+"best_version_id":"..." or null,"missing":["..."],"summary":"..."}.""",
       "audit": """You are an independent auditor of the proposed research brief.
 Identify unsupported factual claims, unaddressed objections and false proof language.
 Return ONLY JSON with issues (list of strings) and suggested_checks (list of strings).
