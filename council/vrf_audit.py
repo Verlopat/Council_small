@@ -67,7 +67,8 @@ def scan_audit_issues(question: str, issues: list[str]) -> list[dict]:
 
 # These patterns flag *possible* faulty reviewer assertions. An objection
 # that quotes an error to criticize it should not be automatically suppressed.
-def objection_conflicts(question: str, ident: str, issue: str) -> list[dict]:
+def objection_conflicts(question: str, ident: str, issue: str,
+                        topic: str = "") -> list[dict]:
     if not re.search(r"\bVRF\b|verifiable random function",question,re.I):
         return []
     if not isinstance(issue,str):
@@ -79,7 +80,8 @@ def objection_conflicts(question: str, ident: str, issue: str) -> list[dict]:
         r"\b(?:incorrectly|wrongly|mistakenly|invalidly|falsely|"
         r"claims?\s+that|assumes?\s+that|error\s+(?:is|in))\b",t,re.I))
     rows=[]
-    if (re.search(r"\btrusted\s+uniqueness\b",t,re.I) and
+    if ((re.search(r"\btrusted\s+uniqueness\b",t,re.I) or
+         topic=="2_trusted_uniqueness") and
         re.search(r"\b(?:without|not\s+(?:given|have|know)|lacks?)\b"
                   r".{0,45}\b(?:SK|secret\s+key)\b",t,re.I)
         and not quotes_error):
@@ -88,7 +90,8 @@ def objection_conflicts(question: str, ident: str, issue: str) -> list[dict]:
                      "message":"Objection appears to require target SK secrecy "
                                "in trusted uniqueness; RFC 9381 provides "
                                "the honestly generated secret key to the adversary."})
-    if (re.search(r"\bpseudorandom",t,re.I) and
+    if ((re.search(r"\bpseudorandom",t,re.I) or
+         topic=="3_pseudorandomness") and
         re.search(r"\b(?:no|without|reject\w*)\b.{0,60}\bproof\b"
                   r".{0,115}\b(?:distinguish\w*|eas\w*|trivial\w*)\b",t,re.I)
         and not quotes_error and not re.search(
@@ -117,7 +120,7 @@ def classify_objections(question: str, objections: list[dict]) -> tuple[list[dic
         # change how the objection is DISPLAYED.
         game_warnings=scan_vrf_games(question,[
             SimpleNamespace(id=ident,statement=issue)])
-        conflict=objection_conflicts(question,ident,issue)
+        conflict=objection_conflicts(question,ident,issue,item.get("topic",""))
         value=dict(item,vrf_warnings=list({
             x["kind"] for x in game_warnings+conflict}))
         (flagged if conflict else remaining).append(value)
