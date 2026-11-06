@@ -50,6 +50,7 @@ class Claim:
     limitations: list[str] = field(default_factory=list)
     needs_re_evaluation: bool = False
     source_span: str | None = None
+    anchor_method: str | None = None
     assumptions: list[str] = field(default_factory=list)
     quantifiers: list[str] = field(default_factory=list)
     scope: str | None = None
@@ -64,6 +65,7 @@ class Claim:
                      limitations=list(self.limitations),
                      needs_re_evaluation=True,
                      source_span=self.source_span,
+                     anchor_method=self.anchor_method,
                      assumptions=list(self.assumptions),
                      quantifiers=list(self.quantifiers), scope=self.scope,
                      artifact_hash=None)
