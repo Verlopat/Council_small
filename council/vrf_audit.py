@@ -90,7 +90,7 @@ def objection_conflicts(question: str, ident: str, issue: str) -> list[dict]:
                                "the honestly generated secret key to the adversary."})
     if (re.search(r"\bpseudorandom",t,re.I) and
         re.search(r"\b(?:no|without|reject\w*)\b.{0,60}\bproof\b"
-                  r".{0,115}\b(?:distinguish|easy|trivial)\b",t,re.I)
+                  r".{0,115}\b(?:distinguish\w*|eas\w*|trivial\w*)\b",t,re.I)
         and not quotes_error and not re.search(
             r"\b(?:does\s+not|cannot|not)\b.{0,30}"
             r"\b(?:distinguish|easy|trivial)\b",t,re.I)):
