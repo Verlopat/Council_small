@@ -607,30 +607,29 @@ class FullCouncilRunner(CouncilRunner):
             owned=[self.ledger.claims[cid] for cid in owner["claim_ids"]
                    if cid in self.ledger.claims]
             duplicate=close_to_owner(statement,owned)
-            if not duplicate:
-                # Allow near-identical text to supply SOURCE provenance for
-                # an unanchored owner. It cannot establish semantic entailment.
-                near=close_to_owner(statement,owned,threshold=0.85)
-                if near:
-                    original=self.ledger.claims[near]
-                    if original.source_span and not original.needs_re_evaluation:
-                        near=None
+            near=duplicate or close_to_owner(statement,owned,threshold=0.85)
+            if near:
+                original=self.ledger.claims[near]
+                if not original.source_span or original.needs_re_evaluation:
+                    try:
+                        # Confirm the rival span is truly present in the
+                        # original answer; similarity is NOT verification.
+                        recovered=validate_anchor(answer,original.statement,
+                            anchored.source_span,assumptions=original.assumptions)
+                    except ValueError:
+                        # A rival assertion with different quantifiers/meaning
+                        # must not be silently discarded.
+                        duplicate=None
                     else:
-                        try:
-                            recovered=validate_anchor(answer,original.statement,
-                                anchored.source_span,assumptions=original.assumptions)
-                        except ValueError:
-                            near=None
-                        else:
-                            if not original.source_span:
-                                original.source_span=recovered.source_span
-                                original.anchor_method="rival_sentence_match"
-                                original.quantifiers=list(recovered.quantifiers)
-                            original.needs_re_evaluation=True
-                            self.events.record("claim_anchor_recovered",
-                                claim_id=original.id,method="rival_sentence_match",
-                                semantic_alignment="unchecked")
-                duplicate=near
+                        if not original.source_span:
+                            original.source_span=recovered.source_span
+                            original.anchor_method="rival_sentence_match"
+                            original.quantifiers=list(recovered.quantifiers)
+                        original.needs_re_evaluation=True
+                        self.events.record("claim_anchor_recovered",
+                            claim_id=original.id,method="rival_sentence_match",
+                            semantic_alignment="unchecked")
+                        duplicate=near
             if duplicate:
                 self.events.record("rival_claim_duplicate_skipped",
                     proposal_id=owner["id"],duplicate_of=duplicate,
@@ -1173,6 +1172,9 @@ class FullCouncilRunner(CouncilRunner):
             [cid+": independent verification required"
              for cid in verdict["blocking"]
              if cid!="composition:1"], self.ledger.claims)
+        # Consolidate before the optional auditor spends the remaining quota.
+        topic_consolidation=(await self._consolidate_topics(question,advisory_findings)
+                             if mode=="full" else [])
         audit=None
         issues=[]
         audit_advisories=[]
@@ -1246,8 +1248,6 @@ class FullCouncilRunner(CouncilRunner):
             [row["id"]+": "+row["issue"]+
              (" (not independently resolved)" if row["source"]=="reviewer" else "")
              for row in still_open]))
-        topic_consolidation=(await self._consolidate_topics(question,advisory_findings)
-                             if mode=="full" else [])
         brief.completion_status=("partial" if proposals else "unresolved")
         brief.limitations=list(dict.fromkeys(brief.limitations+self.warnings))
         result={"research_result":brief.to_dict(),"proposals":proposals,
