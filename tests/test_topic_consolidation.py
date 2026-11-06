@@ -153,5 +153,18 @@ class ConsolidationTests(unittest.TestCase):
         self.assertFalse(others)
 
 
+    def test_inline_s2_warning_is_not_attached_to_s1(self):
+        approach=("[S1] Define three security games. "
+                  "[S2] Trusted uniqueness requires that the adversary "
+                  "never learns the secret key SK. "
+                  "[S3] Full uniqueness permits malicious public keys.")
+        state=SimpleNamespace(ledger=ClaimLedger())
+        warnings=FullCouncilRunner._vrf_findings(
+            state, QUESTION, [{"id":"p2","approach":approach,"claim_ids":[]}])
+        found=[r for r in warnings
+               if r["kind"]=="trusted_uniqueness_sk_secrecy_contradiction"]
+        self.assertEqual([r["claim_id"] for r in found],["p2:approach:S2"])
+
+
 if __name__ == "__main__":
     unittest.main()
