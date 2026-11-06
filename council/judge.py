@@ -121,3 +121,57 @@ def enforce_verdict(proposed: dict, ledger: ClaimLedger) -> dict:
 def judge_failure(ledger: ClaimLedger, partial: str = "") -> dict:
     return enforce_verdict({"status":"unresolved","answer":None,
                             "partial_answer":partial,"cause":"judge_error"},ledger)
+
+TOPIC_SECTIONS = {
+    "full_uniqueness": ("1_full_uniqueness", "3.1"),
+    "trusted_uniqueness": ("2_trusted_uniqueness", "3.3"),
+    "pseudorandomness": ("3_pseudorandomness", "3.4"),
+}
+
+
+def normalize_topic_judgment(topic: str, reference: dict, versions: list[dict],
+                             candidate: dict | None) -> dict:
+    """Keep one source-alignment opinion per game; never upgrade evidence.
+
+    Model-supplied quotations must be verbatim substrings of the indexed
+    excerpt. Invalid/missing quotations cannot ground a positive comparison.
+    """
+    valid_ids={v["id"]: v for v in versions}
+    excerpt=reference.get("excerpt","") if reference else ""
+    source_complete=bool(excerpt and not reference.get("truncated",True))
+    raw_rows=(candidate or {}).get("versions") or []
+    reported={r.get("id"):r for r in raw_rows
+              if isinstance(r,dict) and r.get("id") in valid_ids}
+    rows=[]
+    for ident,original in valid_ids.items():
+        row=reported.get(ident,{})
+        verdict=row.get("status","incomplete")
+        quote=row.get("reference_quote","")
+        if not isinstance(quote,str):quote=""
+        grounded=bool(quote.strip() and quote.strip() in excerpt)
+        if verdict not in {"matches","contradicts","incomplete"}:
+            verdict="incomplete"
+        if not grounded and verdict in {"matches","contradicts"}:
+            verdict="incomplete"
+        rows.append({"id":ident,"statement":original["statement"],
+                     "status":verdict,"reference_quote":quote if grounded else "",
+                     "reason":str(row.get("reason") or
+                                 "No independently grounded comparison")[:500],
+                     "flags":original.get("flags",[])})
+    best=(candidate or {}).get("best_version_id")
+    # An incomplete official reference is never enough to select a definitive
+    # best version. An unquoted 'match' is downgraded above.
+    selected=next((r for r in rows if r["id"]==best),None)
+    if not (source_complete and selected and
+            selected["status"] in {"matches","incomplete"}):
+        best=None
+    return {"topic":topic,"section":reference.get("section") if reference else None,
+            "source":"model_advisory" if candidate else "unavailable",
+            "reference_complete":source_complete,
+            "best_version_id":best,
+            "best_statement":selected["statement"] if best else None,
+            "summary":str((candidate or {}).get("summary") or
+                          "No source-aligned consolidation available")[:1200],
+            "missing":[str(x)[:300] for x in
+                       ((candidate or {}).get("missing") or [])][:8],
+            "versions":rows,"verified":False}
