@@ -582,6 +582,32 @@ class FullCouncilRunner(CouncilRunner):
         self.events.record("run_finished",result=result)
         return result
 
+    def _review_payload(self, question: str, proposal: dict,
+                        *, recheck: bool = False) -> dict:
+        """Bounded review input: claims and the exact sentences they cite.
+
+        Do not send the full proposal, which duplicates the cited sentences
+        and causes needless output truncation in free-tier reviewer models.
+        """
+        rows=[]
+        for cid in proposal["claim_ids"]:
+            claim=self.ledger.claims[cid]
+            span=claim.source_span or ""
+            rows.append({
+                "id":cid,
+                "statement":claim.statement[:1200],
+                "cited_sentence":span[:1600],
+                "source_truncated":len(span)>1600,
+                "source_anchor_missing":not bool(span)})
+        payload={"question":question,"proposal_id":proposal["id"],
+                 "claims":rows}
+        if recheck:
+            payload["review_phase"]="independent_revision_recheck"
+            payload["prior_objections"]=[
+                {"id":o.id,"claim_id":o.claim_id,"issue":o.issue[:500]}
+                for o in self.objections if o.proposal_id==proposal["id"]][:4]
+        return payload
+
     async def _extract_rival(self,owner,other_family):
         answer=owner.get("answer") or owner["approach"]
         result=await self._call(other_family,"extract",{
@@ -775,10 +801,8 @@ class FullCouncilRunner(CouncilRunner):
             if len(proposals)<2 or self.budget.debate_remaining()<=1:break
             peer=proposals[(i+1)%len(proposals)]["family"]
             if peer==p["family"]:continue
-            review=await self._call(peer,"review",{
-                "question":question,"proposal":{"id":p["id"],"approach":p["approach"]},
-                "claims":[{"id":cid,"statement":self.ledger.claims[cid].statement}
-                          for cid in p["claim_ids"]]})
+            review=await self._call(
+                peer,"review",self._review_payload(question,p))
             if not review:continue
             try: rows=item_list(review,"objections")
             except OutputError:continue
@@ -852,13 +876,8 @@ class FullCouncilRunner(CouncilRunner):
             reviewer=next((f for f in self.solvers if f!=p["family"]),None)
             if not reviewer:
                 continue
-            followup=await self._call(reviewer,"review",{
-                "question":question,"proposal":{"id":p["id"],
-                    "approach":p["revised_approach"]},
-                "claims":[{"id":cid,"statement":self.ledger.claims[cid].statement,
-                           "source_span":self.ledger.claims[cid].source_span}
-                          for cid in p["claim_ids"]],
-                "review_phase":"independent_revision_recheck"})
+            followup=await self._call(
+                reviewer,"review",self._review_payload(question,p,recheck=True))
             if followup:
                 try:
                     for raw_ob in item_list(followup,"objections")[:4]:
