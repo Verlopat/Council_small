@@ -164,8 +164,10 @@ def scan_vrf_games(question: str, claims) -> list[dict]:
             distinct_values = re.search(
                 r"\b(?:two|2)\s+(?:distinct|different)\s+"
                 r"(?:valid\s+)?(?:vrf\s+)?(?:outputs?|values?)\b|"
-                r"(?:y|output)\s*[1₁]\s*(?:≠|!=|\\neq)\s*"
-                r"(?:y|output)\s*[2₂]",text,re.I)
+                r"(?:y|β|beta|output)\s*[1₁]\s*(?:≠|!=|\\neq)\s*"
+                r"(?:y|β|beta|output)\s*[2₂]|"
+                r"\bdistinct\s+outputs?\b|"
+                r"\bdifferent\s+outputs?\b",text,re.I)
             if distinct_proofs and not distinct_values:
                 findings.append({
                     "claim_id":cid,"kind":"uniqueness_on_proofs",
