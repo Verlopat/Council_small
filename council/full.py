@@ -17,7 +17,8 @@ from council.assignment import Assignment
 from council.dependencies import Dependency
 from council.bus import MessageCap, MessageBus
 from council.evidence import EvidenceRejected
-from council.extract import validate_anchor, locate_source_span, numbered_sentence_excerpt, suggest_duplicate_claims
+from council.extract import (validate_anchor, locate_source_span, numbered_sentence_excerpt,
+                             source_sentence_ids, suggest_duplicate_claims)
 from council.judge import (blind_ledger, enforce_verdict, judge_failure,
                            topic_of, TOPIC_SECTIONS, normalize_topic_judgment)
 from council.claim_filter import is_meta_claim, close_to_owner
@@ -35,7 +36,8 @@ from council.requirements import Requirements
 from council.vrf_sanity import scan_vrf_games
 from council.vrf_audit import (scan_audit_issues, classify_objections,
                                partition_addressed_objections)
-from council.definition_sources import classify as definition_kind, consult as consult_definition, is_summary, topic_text
+from council.definition_sources import (classify as definition_kind, consult as consult_definition,
+                                        game_step, SECTION_HEADINGS, is_summary, topic_text)
 
 # Four-solvers variant would leave no reliable independently reserved auditing
 # family given the currently configured MiniMax limitation, so default to three.
@@ -94,6 +96,7 @@ class FullCouncilRunner(CouncilRunner):
         self.checked_sources=set()
         self.extra_obligations=[]
         self.reference_checks=[]
+        self._definition_context_by_claim={}
         self._translator_unavailable=False
         self.objections=[]
         self.author_responses=[]
@@ -105,8 +108,37 @@ class FullCouncilRunner(CouncilRunner):
         answer=body.get("answer")
         if isinstance(answer,str) and answer and answer!=p["approach"]:
             sources.append(("answer",answer))
+        # Track which original [S#] sentences are cited by *owner* claims.
+        # Their source-level coverage can suppress later verbatim rival copies.
+        # It does not establish claim equivalence or scientific correctness.
+        tagged=list(re.finditer(r"(?<!\S)\[S([1-9][0-9]*)\]\s+",p["approach"]))
+        section_by_sentence={}
+        current_scope=None
+        group_section={"1_full_uniqueness":"3.1",
+                       "2_trusted_uniqueness":"3.3",
+                       "3_pseudorandomness":"3.4"}
+        for j,tag in enumerate(tagged):
+            stop=tagged[j+1].start() if j+1<len(tagged) else len(p["approach"])
+            key=topic_of(p["approach"][tag.end():stop])
+            if key in group_section:
+                current_scope=group_section[key]
+            section_by_sentence[int(tag.group(1))]=current_scope
+        p["claim_sentence_ids"]={}
         for raw,cid in zip(item_list(body,"claims"),p["claim_ids"]):
             claim=self.ledger.claims[cid]
+            declared=raw.get("sentence_ids")
+            ids=([i for i in declared if type(i) is int and 1<=i<=100]
+                 if isinstance(declared,list) else [])
+            if not ids and isinstance(raw.get("source_span"),str):
+                ids=source_sentence_ids(p["approach"],raw["source_span"])
+            ids=[i for i in ids if i in section_by_sentence]
+            p["claim_sentence_ids"][cid]=ids
+            scopes={section_by_sentence[i] for i in ids
+                    if section_by_sentence[i] is not None}
+            if len(scopes)==1:
+                section=next(iter(scopes))
+                self._definition_context_by_claim[cid]=(
+                    SECTION_HEADINGS[section],section)
             declared_span=raw.get("source_span") or raw.get("span")
             assumptions=string_list(raw,"assumptions")
             anchored=None
@@ -241,9 +273,21 @@ class FullCouncilRunner(CouncilRunner):
             self.extra_obligations.append(
                 claim.id+": redundant summary; evaluate its underlying claims")
             return
-        definition=definition_kind(self.requirements.objective
-                    if self.requirements else self._current_question,
-                    claim.statement)
+        question=(self.requirements.objective
+                  if self.requirements else self._current_question)
+        definition=definition_kind(question,claim.statement)
+        if definition is None and game_step(question,claim.statement):
+            definition=self._definition_context_by_claim.get(claim.id)
+            if definition is None:
+                # The step belongs to a VRF security-game description, but
+                # no trusted section label can be determined from the claim.
+                # Avoid spending GLM quota OR mislabeling it as RFC §3.1.
+                self.events.record("definition_game_step_unscoped",
+                                   claim_id=claim.id)
+                self.extra_obligations.append(
+                    claim.id+": VRF game-step definition lacks a reliable "
+                    "section label; RFC alignment must be checked manually")
+                return
         if definition is not None:
             heading, section=definition
             result=consult_definition(self.paper_index,heading,section,claim.id)
@@ -635,6 +679,22 @@ class FullCouncilRunner(CouncilRunner):
                 anchored=validate_anchor(answer,statement,span,
                            assumptions=string_list(entry,"assumptions"))
             except (OutputError,ValueError):
+                continue
+            # The rival may simply split an already-cited [S#] section
+            # into individual sentences. Use source provenance, not similarity
+            # of owner summaries, to avoid a dozen redundant re-extractions.
+            # A rival-supplied sentence ID is not trusted without matching
+            # the actual quoted span to the original source.
+            source_ids=source_sentence_ids(owner["approach"],anchored.source_span)
+            covered={sid for ids in owner.get("claim_sentence_ids",{}).values()
+                     for sid in ids}
+            if source_ids and set(source_ids)<=covered:
+                self.events.record("rival_claim_duplicate_skipped",
+                    proposal_id=owner["id"],
+                    duplicate_of="covered_by_owner_claims",
+                    source_sentence_ids=source_ids,
+                    similarity_policy="owner_sentence_provenance",
+                    semantic_equivalence="not_verified")
                 continue
             owned=[self.ledger.claims[cid] for cid in owner["claim_ids"]
                    if cid in self.ledger.claims]
