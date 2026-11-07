@@ -20,11 +20,37 @@ def topic_text(value: str) -> str:
     return " ".join(value.translate(_TOPIC_DASHES).casefold().split())
 
 
+# Prefer the specific trusted-key definition when a claim contrasts
+# trusted uniqueness with full uniqueness in the same sentence.
 DEFINITIONS = (
-    ("full uniqueness", "Full Uniqueness", "3.1"),
     ("trusted uniqueness", "Trusted Uniqueness", "3.3"),
+    ("full uniqueness", "Full Uniqueness", "3.1"),
     ("pseudorandomness", "Full Pseudorandomness", "3.4"),
 )
+
+SECTION_HEADINGS = {section: heading for _, heading, section in DEFINITIONS}
+
+
+def game_step(question: str, statement: str) -> bool:
+    """Identify generic VRF game steps lacking explicit property names.
+
+    These are definitional context, NOT candidate theorems to send to a
+    translator. A missing game label must not be guessed as a particular
+    RFC subsection.
+    """
+    question_norm=topic_text(question)
+    if not re.search(r"\bvrf\b|verifiable random function",question_norm):
+        return False
+    if not re.search(r"\b(?:security\s+)?games?\b|\buniqueness\b|\bpseudorandom",question_norm):
+        return False
+    text=topic_text(statement)
+    if re.search(r"\breduc(?:es?|tion)\b|\bproof of\b|\bunder (?:lwe|sis)\b|"
+                 r"\b(?:this|our|the proposed) (?:scheme|construction|vrf)\b|"
+                 r"\b(?:satisfies|achieves|is secure|holds assuming|follows from)\b",text):
+        return False
+    return bool(re.search(r"\bchalleng(?:e|er)\b|\badversar(?:y|ial)\b|"
+                          r"\boracle\b|\bgames?\b|\bwins?\b",text))
+
 
 
 def classify(question: str, statement: str) -> tuple[str, str] | None:
