@@ -63,11 +63,20 @@ def scan_audit_issues(question: str, issues: list[str]) -> list[dict]:
                           "defining restriction. Assess key origin and "
                           "accepted outputs, not key secrecy alone.",
                 "reference":"RFC 9381 Sections 3.1 and 3.3"})
-        # Criticisms quote defective games; scanning them as if they were
-        # standalone proposed games invents missing-oracle and proof-leak
-        # warnings about the *critic*, not about the claim. Keep only
-        # auditor-specific direct-assertion warnings here. Every raw issue
-        # still receives separate, narrow objection classification below.
+        # Criticisms quote defective games; scanning them as standalone
+        # proposed games creates missing-oracle and proof-leak false positives.
+        # Preserve one narrow direct-assertion check for trusted-uniqueness
+        # secret-key exclusion, but ignore quoted reports of somebody else's
+        # error. All other issues go through objection classification below.
+        reports_error=bool(re.search(
+            r"\b(?:incorrectly|wrongly|mistakenly|invalidly|falsely|"
+            r"claims?\s+that|assumes?\s+that|error\s+(?:is|in))\b",
+            text,re.I))
+        if not reports_error and re.search(r"\btrusted\s+uniqueness\b",text,re.I):
+            direct=scan_vrf_games(question,[
+                SimpleNamespace(id=ident,statement=issue)])
+            rows.extend(w for w in direct
+                        if w["kind"]=="trusted_uniqueness_sk_secrecy_contradiction")
     return list({(r["claim_id"],r["kind"]):r for r in rows}.values())
 
 
