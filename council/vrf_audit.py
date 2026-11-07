@@ -23,7 +23,10 @@ def scan_audit_issues(question: str, issues: list[str]) -> list[dict]:
             (re.search(
                 r"\b(?:challenge|pseudorandomness)\b.{0,140}"
                 r"\b(?:must|should|requires?|needs?)\b.{0,65}"
-                r"\b(?:reveal|provide|return|disclose)",text,re.I)
+                r"\b(?:be\s+)?(?:reveal\w*|provid\w*|return\w*|"
+                r"disclos\w*|includ\w*)\s+"
+                r"(?:(?:a|an|the|its)\s+)?"
+                r"(?:(?:valid(?:ating)?|simulated?)\s+)?proof\b",text,re.I)
              or re.search(
                 r"\bnever\s+reveal\w*\b.{0,150}\bproof\b.{0,240}"
                 r"\b(?:contradict|invalid|false|wrong|necessary|must)\b",
@@ -60,8 +63,11 @@ def scan_audit_issues(question: str, issues: list[str]) -> list[dict]:
                           "defining restriction. Assess key origin and "
                           "accepted outputs, not key secrecy alone.",
                 "reference":"RFC 9381 Sections 3.1 and 3.3"})
-        rows.extend(scan_vrf_games(question,[
-            SimpleNamespace(id=ident,statement=issue)]))
+        # Criticisms quote defective games; scanning them as if they were
+        # standalone proposed games invents missing-oracle and proof-leak
+        # warnings about the *critic*, not about the claim. Keep only
+        # auditor-specific direct-assertion warnings here. Every raw issue
+        # still receives separate, narrow objection classification below.
     return list({(r["claim_id"],r["kind"]):r for r in rows}.values())
 
 
@@ -90,18 +96,31 @@ def objection_conflicts(question: str, ident: str, issue: str,
                      "message":"Objection appears to require target SK secrecy "
                                "in trusted uniqueness; RFC 9381 provides "
                                "the honestly generated secret key to the adversary."})
-    if ((re.search(r"\bpseudorandom",t,re.I) or
-         topic=="3_pseudorandomness") and
-        re.search(r"\b(?:no|without|reject\w*)\b.{0,60}\bproof\b"
-                  r".{0,115}\b(?:distinguish\w*|eas\w*|trivial\w*)\b",t,re.I)
-        and not quotes_error and not re.search(
-            r"\b(?:does\s+not|cannot|not)\b.{0,30}"
-            r"\b(?:distinguish|easy|trivial)\b",t,re.I)):
+    pseudo=bool(re.search(r"\bpseudorandom",t,re.I) or
+                topic=="3_pseudorandomness")
+    # A correct criticism often says "the challenge must be returned without
+    # a proof, as verification would trivially distinguish a random value".
+    # That is NOT an objection requiring proof disclosure.
+    says_must_omit=bool(re.search(
+        r"\b(?:must|should|is|are)\s+(?:be\s+)?"
+        r"(?:provided|given|returned|revealed|output)\s+without\b"
+        r".{0,30}\bproof\b|"
+        r"\bwithout\s+(?:a|its|the)\s+proof\b.{0,40}"
+        r"\b(?:as|because|since)\b.{0,60}\bverif\w*\b"
+        r".{0,60}\b(?:distinguish\w*|trivial\w*)\b",t,re.I))
+    # Require an EXPLICIT assertion that the lack of a proof enables an
+    # adversary to distinguish; mere co-occurrence is insufficient.
+    complains_missing=bool(re.search(
+        r"\b(?:no|without|missing|lacks?)\b.{0,40}\bproof\b"
+        r".{0,90}\b(?:adversary|it)\b.{0,45}"
+        r"\b(?:can|could|would)\b.{0,45}"
+        r"\b(?:distinguish\w*|trivial\w*|eas\w*)\b",t,re.I))
+    if pseudo and complains_missing and not says_must_omit and not quotes_error:
         rows.append({"claim_id":ident,"kind":"contradicts_rfc_3_4_no_challenge_proof",
                      "reference":"RFC 9381 Section 3.4",
-                     "message":"Objection appears to assume the random challenge "
-                               "should expose a validating proof; RFC 9381 "
-                               "reveals only the challenge output."})
+                     "message":"Objection appears to say a missing challenge "
+                               "proof makes distinguishing easy. RFC 9381 "
+                               "withholds the challenge proof intentionally."})
     return rows
 
 
