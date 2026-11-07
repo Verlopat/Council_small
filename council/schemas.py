@@ -131,11 +131,19 @@ class TopicVersion(ModelSchema):
     reason:str=Field(min_length=1)
 
 
+class TopicPartialMatch(ModelSchema):
+    id:str=Field(min_length=1)
+    agrees:list[str]=Field(default_factory=list)
+    conflicts:list[str]=Field(default_factory=list)
+    reference_quote:str=""
+
+
 class TopicJudge(ModelSchema):
     topic:str=Field(min_length=1)
     versions:list[TopicVersion]=Field(default_factory=list)
     best_version_id:str|None=None
     missing:list[str]=Field(default_factory=list)
+    partial_matches:list[TopicPartialMatch]=Field(default_factory=list)
     summary:str=Field(min_length=1)
 
 
