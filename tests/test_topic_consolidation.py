@@ -6,7 +6,9 @@ from council.judge import TOPIC_SECTIONS, normalize_topic_judgment
 from council.claim_filter import close_to_owner
 from council.full import FullCouncilRunner
 from council.models import Claim, ClaimLedger, ClaimStatus
-from council.vrf_audit import classify_objections, objection_conflicts
+from council.vrf_audit import (classify_objections, objection_conflicts,
+                               scan_audit_issues, partition_addressed_objections)
+from council.families import endpoint_list
 from council.vrf_sanity import scan_vrf_games
 from council.extract import numbered_sentence_excerpt
 from council.schemas import validate
@@ -65,8 +67,8 @@ class ConsolidationTests(unittest.TestCase):
         obs=[{"id":"o1","source":"reviewer","issue":
              "Trusted uniqueness adversary lacks the secret key SK."},
              {"id":"o2","source":"auditor","issue":
-              "Pseudorandomness: without proof the challenger is trivially "
-              "distinguishable."},
+              "Pseudorandomness: without a proof the adversary can trivially "
+              "distinguish the real challenge from random."},
              {"id":"o3","source":"reviewer","issue":
               "The pseudorandomness game does not specify a fresh challenge."}]
         flagged,remaining=classify_objections(QUESTION,obs)
@@ -164,6 +166,133 @@ class ConsolidationTests(unittest.TestCase):
         found=[r for r in warnings
                if r["kind"]=="trusted_uniqueness_sk_secrecy_contradiction"]
         self.assertEqual([r["claim_id"] for r in found],["p2:approach:S2"])
+
+
+    def test_wrapped_rfc_quote_is_grounded(self):
+        ref={"section":"3.1",
+             "excerpt":"One public key and a common input,\\n"
+                       "   but two different outputs are forbidden.",
+             "truncated":False}
+        versions=[{"id":"p3:c1","statement":"No two different outputs.","flags":[]}]
+        verdict={"topic":"full_uniqueness",
+                 "versions":[{"id":"p3:c1","status":"matches",
+                     "reference_quote":"a common input, but two different outputs",
+                     "reason":"Same property"}],
+                 "best_version_id":"p3:c1","summary":"Two different outputs forbidden",
+                 "missing":[]}
+        fixed=normalize_topic_judgment("full_uniqueness",ref,versions,verdict)
+        self.assertEqual(fixed["best_version_id"],"p3:c1")
+        self.assertTrue(fixed["versions"][0]["quote_grounded"])
+        self.assertFalse(fixed["verified"])
+
+    def test_soft_hyphen_in_rfc_does_not_invalidate_quote(self):
+        ref={"section":"3.4","excerpt":"pseudo\u00adrandom challenge output",
+             "truncated":False}
+        reply={"versions":[{"id":"p3:c3","status":"matches",
+                 "reference_quote":"pseudorandom challenge output",
+                 "reason":"Source text"}],"best_version_id":"p3:c3",
+               "summary":"Pseudorandomness","missing":[]}
+        versions=[{"id":"p3:c3","statement":"Pseudorandom challenge output.","flags":[]}]
+        fixed=normalize_topic_judgment("pseudorandomness",ref,versions,reply)
+        self.assertEqual(fixed["best_version_id"],"p3:c3")
+
+    def test_none_selected_explains_partial_matches(self):
+        ref={"section":"3.3",
+             "excerpt":"Honest keys, adversary learns the secret key, and "
+                       "two distinct accepted outputs for one input.",
+             "truncated":False}
+        versions=[{"id":"p1:c2","statement":"SK given, wrong win condition","flags":[]},
+                  {"id":"p3:c2","statement":"SK withheld, right win condition","flags":[]}]
+        reply={"versions":[
+            {"id":"p1:c2","status":"incomplete",
+             "reference_quote":"adversary learns the secret key",
+             "reason":"Wrong output condition"},
+            {"id":"p3:c2","status":"contradicts",
+             "reference_quote":"two distinct accepted outputs for one input",
+             "reason":"SK withheld"}],"best_version_id":None,
+            "missing":["combine the source-aligned requirements"],
+            "summary":"Neither version matches §3.3.",
+            "partial_matches":[
+                {"id":"p1:c2","agrees":["secret key is given"],
+                 "conflicts":["wrong win condition"],
+                 "reference_quote":"adversary learns the secret key"},
+                {"id":"p3:c2","agrees":["right two-output win condition"],
+                 "conflicts":["secret key withheld"],
+                 "reference_quote":"two distinct accepted outputs for one input"},
+                {"id":"p9:c9","agrees":["invented"],"conflicts":[],
+                 "reference_quote":"invented"}]}
+        result=normalize_topic_judgment("trusted_uniqueness",ref,versions,reply)
+        self.assertIsNone(result["best_version_id"])
+        self.assertEqual([m["id"] for m in result["partial_matches"]],
+                         ["p1:c2","p3:c2"])
+        self.assertFalse(result["verified"])
+
+    def test_audit3_correct_no_challenge_proof_not_flagged(self):
+        issue=("p1:c3 describes the pseudorandomness game as providing a "
+               "simulated proof in the random case (b=1). In standard VRF "
+               "security definitions, the challenge output must be provided "
+               "WITHOUT a proof, as the ability to verify the output would "
+               "trivially distinguish it from a random value.")
+        rows=objection_conflicts(QUESTION,"audit:3",issue)
+        self.assertEqual(rows,[])
+        self.assertFalse(any(
+            r["kind"]=="auditor_challenge_proof_scope_confusion"
+            for r in scan_audit_issues(QUESTION,[issue])))
+        flagged,regular=classify_objections(QUESTION,[
+            {"id":"audit:3","source":"auditor","issue":issue}])
+        self.assertEqual(flagged,[])
+        self.assertEqual(len(regular),1)
+
+    def test_objection_already_addressed_requires_post_challenge_rule(self):
+        objection={"id":"o3","source":"reviewer",
+                   "topic":"3_pseudorandomness",
+                   "issue":"The game does not stop the adversary from later "
+                           "querying Eval on x* for a proof.",
+                   "target_text":"x* not previously queried; the adversary "
+                                 "is forbidden from querying Eval on x* after "
+                                 "the challenge."}
+        addressed,open_items=partition_addressed_objections([objection])
+        self.assertEqual([r["id"] for r in addressed],["o3"])
+        self.assertEqual(open_items,[])
+        self.assertEqual(addressed[0]["advisory_status"],
+                         "already_addressed_by_claim")
+        self.assertNotIn("target_text",addressed[0])
+
+    def test_prechallenge_only_is_not_sufficient(self):
+        objection={"id":"o3","source":"reviewer",
+                   "topic":"3_pseudorandomness",
+                   "issue":"It does not forbid the adversary from later "
+                           "querying Eval on x* after the challenge.",
+                   "target_text":"Adversary chooses x* not previously queried."}
+        addressed,open_items=partition_addressed_objections([objection])
+        self.assertEqual(addressed,[])
+        self.assertEqual(len(open_items),1)
+
+    def test_uniqueness_beta_outputs_is_not_proof_only(self):
+        claim=("Full uniqueness: adversary supplies two distinct proofs "
+               "π₁, π₂ that both verify on one input, with distinct outputs "
+               "β₁ ≠ β₂.")
+        warnings=scan_vrf_games(QUESTION,[
+            SimpleNamespace(id="p3:c1:repair",statement=claim)])
+        self.assertNotIn("uniqueness_on_proofs",
+                         {r["kind"] for r in warnings})
+
+    def test_reviewer_payload_does_not_duplicate_full_proposal(self):
+        ledger=ClaimLedger()
+        claim=Claim("p3:c3",1,
+            "Pseudorandomness oracle has a fresh challenge.","nemotron")
+        claim.source_span="The challenger chooses x* with no prior queries."
+        ledger.add_claim(claim)
+        state=SimpleNamespace(ledger=ledger,objections=[])
+        p={"id":"p3","claim_ids":["p3:c3"],"approach":"very long full proposal"}
+        result=FullCouncilRunner._review_payload(state,QUESTION,p)
+        self.assertNotIn("approach",str(result))
+        self.assertEqual(result["claims"][0]["cited_sentence"],claim.source_span)
+        self.assertEqual(result["claims"][0]["id"],"p3:c3")
+
+    def test_nemotron_and_command_max_tokens_all_roles(self):
+        self.assertTrue(all(x.max_tokens>=8000 for x in endpoint_list("nemotron")))
+        self.assertTrue(all(x.max_tokens>=4000 for x in endpoint_list("command")))
 
 
 if __name__ == "__main__":
