@@ -19,12 +19,14 @@ class Family:
 
 FAMILIES: dict[str, Family] = {
     "gpt-oss": Family("gpt-oss", (Endpoint("Groq", "openai/gpt-oss-120b"),)),
-    "command": Family("command", (Endpoint("Cohere", "command-a-plus-05-2026"),
-                                  Endpoint("Cohere", "command-a-03-2025"))),
+    "command": Family("command", (Endpoint("Cohere", "command-a-plus-05-2026",
+                                               timeout_seconds=90, max_tokens=4000),
+                                  Endpoint("Cohere", "command-a-03-2025",
+                                           timeout_seconds=90, max_tokens=4000))),
     "nemotron": Family("nemotron", (Endpoint("OpenRouter", "nvidia/nemotron-3-ultra-550b-a55b:free",
-                                               timeout_seconds=100),
+                                               timeout_seconds=110, max_tokens=8000),
                                     Endpoint("LLM7.io", "nemotron-3-nano:30b",
-                                             timeout_seconds=90, max_tokens=6000))),
+                                             timeout_seconds=110, max_tokens=8000))),
     "gemma": Family("gemma", (Endpoint("Ollama Cloud", "gemma4:31b"),)),
     "gemini": Family("gemini", (Endpoint("Gemini", "gemini-3.6-flash"),
                                Endpoint("Gemini", "gemini-3.5-flash-lite"),
