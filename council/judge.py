@@ -129,16 +129,22 @@ TOPIC_SECTIONS = {
 }
 
 
+def _flat(text: str) -> str:
+    """Normalize RFC line wraps and soft hyphens without changing words."""
+    return " ".join(text.replace("\u00ad", "").split()).casefold()
+
+
 def normalize_topic_judgment(topic: str, reference: dict, versions: list[dict],
                              candidate: dict | None) -> dict:
     """Keep one source-alignment opinion per game; never upgrade evidence.
 
-    Model-supplied quotations must be verbatim substrings of the indexed
-    excerpt. Invalid/missing quotations cannot ground a positive comparison.
+    Model-supplied quotations must match the indexed excerpt after whitespace
+    normalization. Invalid/missing quotations cannot ground a positive comparison.
     """
     valid_ids={v["id"]: v for v in versions}
     excerpt=reference.get("excerpt","") if reference else ""
     source_complete=bool(excerpt and not reference.get("truncated",True))
+    flat_excerpt=_flat(excerpt)
     raw_rows=(candidate or {}).get("versions") or []
     reported={r.get("id"):r for r in raw_rows
               if isinstance(r,dict) and r.get("id") in valid_ids}
@@ -148,13 +154,14 @@ def normalize_topic_judgment(topic: str, reference: dict, versions: list[dict],
         verdict=row.get("status","incomplete")
         quote=row.get("reference_quote","")
         if not isinstance(quote,str):quote=""
-        grounded=bool(quote.strip() and quote.strip() in excerpt)
+        grounded=bool(quote.strip() and _flat(quote) in flat_excerpt)
         if verdict not in {"matches","contradicts","incomplete"}:
             verdict="incomplete"
         if not grounded and verdict in {"matches","contradicts"}:
             verdict="incomplete"
         rows.append({"id":ident,"statement":original["statement"],
                      "status":verdict,"reference_quote":quote if grounded else "",
+                     "quote_grounded":grounded,
                      "reason":str(row.get("reason") or
                                  "No independently grounded comparison")[:500],
                      "flags":original.get("flags",[])})
@@ -165,6 +172,22 @@ def normalize_topic_judgment(topic: str, reference: dict, versions: list[dict],
     if not (source_complete and selected and selected["reference_quote"] and
             selected["status"] in {"matches","incomplete"}):
         best=None
+    partial=[]
+    if source_complete:
+        for item in (candidate or {}).get("partial_matches",[]) or []:
+            if not isinstance(item,dict) or item.get("id") not in valid_ids:
+                continue
+            quote=item.get("reference_quote","")
+            if not isinstance(quote,str) or not quote.strip() or _flat(quote) not in flat_excerpt:
+                continue
+            agrees=item.get("agrees") or []
+            conflicts=item.get("conflicts") or []
+            if not (isinstance(agrees,list) and isinstance(conflicts,list)):
+                continue
+            partial.append({
+                "id":item["id"],"reference_quote":quote,
+                "agrees":[x[:350] for x in agrees[:3] if isinstance(x,str)],
+                "conflicts":[x[:350] for x in conflicts[:3] if isinstance(x,str)]})
     return {"topic":topic,"section":reference.get("section") if reference else None,
             "source":"model_advisory" if candidate else "unavailable",
             "reference_complete":source_complete,
@@ -174,4 +197,5 @@ def normalize_topic_judgment(topic: str, reference: dict, versions: list[dict],
                           "No source-aligned consolidation available")[:1200],
             "missing":[str(x)[:300] for x in
                        ((candidate or {}).get("missing") or [])][:8],
+            "partial_matches":partial,
             "versions":rows,"verified":False}
