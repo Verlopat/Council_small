@@ -240,8 +240,22 @@ def main(argv=None) -> int:
                     print("  Best source-aligned claim: "+best+" — "+
                           str(row.get("best_statement") or "")[:220])
                 else:
-                    print("- "+topic+": No source-aligned version selected "
-                          "(reference or model comparison unavailable/incomplete).")
+                    print("- "+topic+": No fully matching version selected.")
+                    if row.get("source")=="model_advisory" and row.get("reference_complete"):
+                        print("  RFC-based comparison: "+
+                              str(row.get("summary") or "")[:550])
+                    else:
+                        print("  Reference or topic-judge comparison unavailable/incomplete.")
+                    for partial in (row.get("partial_matches") or [])[:6]:
+                        bits=[]
+                        agrees=partial.get("agrees") or []
+                        conflicts=partial.get("conflicts") or []
+                        if agrees:
+                            bits.append("right: "+"; ".join(str(x) for x in agrees[:2]))
+                        if conflicts:
+                            bits.append("wrong/missing: "+"; ".join(str(x) for x in conflicts[:2]))
+                        if bits:
+                            print("  "+str(partial.get("id"))+" — "+" | ".join(bits)[:600])
                 missing=row.get("missing") or []
                 if missing:
                     print("  Missing: "+"; ".join(str(x) for x in missing[:3]))
@@ -277,6 +291,13 @@ def main(argv=None) -> int:
         print("\nHypotheses:\n" + "\n".join("- " + x for x in brief["hypotheses"]))
         print("\nUnresolved reviewer objections:\n" + (
             "\n".join("- " + x for x in brief["unresolved_objections"]) or "(none)"))
+        already=result.get("already_addressed_objections") or []
+        if already:
+            print("\nObjections already addressed by their cited claim "
+                  "(advisory text match; not verified):\n"+
+                  "\n".join("- "+str(o.get("id"))+": "+str(o.get("issue"))+
+                            " ["+str(o.get("matched_requirement"))+"]"
+                            for o in already))
         conflicts=result.get("rfc_conflicting_objections") or []
         if conflicts:
             print("\nObjections that may conflict with RFC 9381 "
