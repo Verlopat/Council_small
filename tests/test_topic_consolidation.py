@@ -170,7 +170,7 @@ class ConsolidationTests(unittest.TestCase):
 
     def test_wrapped_rfc_quote_is_grounded(self):
         ref={"section":"3.1",
-             "excerpt":"One public key and a common input,\\n"
+             "excerpt":"One public key and a common input,\n"
                        "   but two different outputs are forbidden.",
              "truncated":False}
         versions=[{"id":"p3:c1","statement":"No two different outputs.","flags":[]}]
