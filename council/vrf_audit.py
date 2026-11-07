@@ -144,3 +144,69 @@ def classify_objections(question: str, objections: list[dict]) -> tuple[list[dic
             x["kind"] for x in game_warnings+conflict}))
         (flagged if conflict else remaining).append(value)
     return flagged,remaining
+
+# The scope of an objection matters: pre-challenge freshness is not by itself
+# a defense against querying the target *after* the challenge.
+PRE_CHALLENGE = re.compile(
+    r"\b(?:not|never)\s+previously\s+queried\b|"
+    r"\bfresh\s+(?:challenge\s+)?input\b|"
+    r"\b(?:not|never)\s+queried\s+before\b", re.I)
+POST_CHALLENGE = re.compile(
+    r"\b(?:forbid\w*|may\s+not|cannot|must\s+not|"
+    r"not\s+allow\w*|disallow\w*|prohibit\w*)\b"
+    r".{0,90}\b(?:quer\w*|ask\w*|eval(?:uate|uation)?)\b"
+    r".{0,100}(?:x\s*\*|challenge\s+input)|"
+    r"\b(?:x\s*\*|challenge\s+input)\b.{0,80}"
+    r"\b(?:cannot|must\s+not|forbid\w*|disallow\w*)\b"
+    r".{0,50}\bquer\w*\b",re.I)
+SK_DISCLOSED = re.compile(
+    r"\bgives?\s+(?:both\s+)?pk\s+and\s+sk\b|"
+    r"\b(?:adversary|attacker)\s+"
+    r"(?:receives|is\s+given|gets|knows)\s+"
+    r".{0,45}\b(?:sk|secret\s+key)\b|"
+    r"\bgives?\s+(?:the\s+)?adversary\s+"
+    r".{0,45}\b(?:sk|secret\s+key)\b",re.I)
+
+
+def partition_addressed_objections(objections: list[dict]) -> tuple[list[dict],list[dict]]:
+    """Advisory: identify complaints answered *in the cited claim's own text*.
+
+    A source quotation is only provenance: lexical coverage never proves
+    that the entire game is correct. Raw objections remain in stored records.
+    """
+    addressed,unresolved=[],[]
+    for item in objections:
+        issue=str(item.get("issue") or "")
+        target=str(item.get("target_text") or "")
+        topic=item.get("topic","")
+        correction=None
+        if topic=="3_pseudorandomness" and re.search(
+            r"\b(?:quer\w*|oracle|fresh|challenge\s+input|"
+            r"same\s+input)\b",issue,re.I):
+            # An objection about later target evaluation needs an explicit
+            # prohibition on post-challenge queries, not just past freshness.
+            post_issue=bool(re.search(
+                r"\b(?:later|after|subsequent|post.challenge)\b|"
+                r"\bobtain\w*\s+a\s+proof\b",issue,re.I))
+            pre_issue=bool(re.search(
+                r"\b(?:fresh|previously|before|already\s+queried)\b",
+                issue,re.I))
+            if post_issue and POST_CHALLENGE.search(target):
+                correction="post_challenge_target_queries_forbidden"
+                if pre_issue and not PRE_CHALLENGE.search(target):
+                    correction=None
+            elif pre_issue and not post_issue and PRE_CHALLENGE.search(target):
+                correction="fresh_target_not_previously_queried"
+        if not correction and topic=="2_trusted_uniqueness" and re.search(
+            r"\b(?:not|never|missing|lacks?|without|only\s+pk)\b"
+            r".{0,65}\b(?:sk|secret\s+key)\b",issue,re.I):
+            if SK_DISCLOSED.search(target):
+                correction="target_secret_key_disclosed"
+        clean={k:v for k,v in item.items() if k!="target_text"}
+        if correction:
+            addressed.append(dict(clean,
+                advisory_status="already_addressed_by_claim",
+                matched_requirement=correction))
+        else:
+            unresolved.append(clean)
+    return addressed,unresolved
