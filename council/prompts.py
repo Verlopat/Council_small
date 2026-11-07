@@ -21,7 +21,11 @@ without inventing a construction or asserting an unproved reduction.
 If required details are not established, identify the precise gap.
 Return ONE complete JSON object with required top-level keys:
 approach (nonempty string), claims (nonempty list), hypotheses (list of strings),
-experiments (list of strings). Every claim has keys id, statement, source_span, sentence_ids,
+experiments (list of strings). Write AT MOST SIX substantive atomic claims;
+for a three-game VRF question, give one core claim for EACH named game
+before any supporting claims. Be concise: avoid repeating the approach inside
+each statement and avoid verbose commentary. Every claim has keys
+id, statement, source_span, sentence_ids,
 assumptions, limitations, depends_on, dependency_argument.
 All claim fields are required. Write the approach as short, clearly numbered
 lines: [S1] sentence text, [S2] sentence text, etc., each on a separate line.
