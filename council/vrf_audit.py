@@ -146,7 +146,7 @@ def objection_conflicts(question: str, ident: str, issue: str,
         r"\b(?:as|because|since)\b.{0,65}\bverif\w*\b"
         r".{0,65}\b(?:distinguish\w*|trivial\w*)\b",t,re.I))
     omitted=bool(re.search(
-        r"\b(?:omit\w*|absen\w*|miss\w*|lack\w*|without|no|reject\w*)\b"
+        r"\b(?:omit\w*|omis\w*|absen\w*|miss\w*|lack\w*|without|no|reject\w*)\b"
         r".{0,95}\bproof\b|\babsence\s+of\s+(?:a\s+)?valid\s+proof\b",t,re.I))
     causal=bool(re.search(
         r"\b(?:distinguish\w*|trivial\w*|detect\w*|"
@@ -206,12 +206,12 @@ POST_CHALLENGE = re.compile(
     r".{0,50}\bquer\w*\b",re.I)
 SK_DISCLOSED = re.compile(
     # A positive grant is required. "given only pk (never sk)" must NOT match.
-    r"\b(?:gives?\s+both\s+pk\s+and\s+sk|"
+    r"\b(?:(?<!not\s)(?<!never\s)(?<!without\s)gives?\s+both\s+pk\s+and\s+sk|"
     r"(?:adversary|attacker)\s+"
     r"(?:is\s+given|receives|gets|knows|may\s+know)\s+"
     r"(?:(?!\b(?:not|never|without|only\s+pk)\b).){0,55}"
     r"\b(?:sk|secret\s+key)\b|"
-    r"gives?\s+(?:the\s+)?adversary\s+"
+    r"(?<!not\s)(?<!never\s)(?<!without\s)gives?\s+(?:the\s+)?adversary\s+"
     r"(?:(?!\b(?:not|never|without|only\s+pk)\b).){0,55}"
     r"\b(?:sk|secret\s+key)\b)",re.I)
 MALFORMED_PK = re.compile(
@@ -300,7 +300,7 @@ def _objection_signature(issue: str) -> str | None:
             and re.search(r"\b(?:comput\w*|us\w*|evaluat\w*)\b",t)
             and re.search(r"\b(?:trivial|break\w*|two\s+distinct)\b",t)):
         return "sk_computation_misread_as_uniqueness_break"
-    if (re.search(r"\b(?:omit\w*|absen\w*|miss\w*|without|lack\w*)\b"
+    if (re.search(r"\b(?:omit\w*|omis\w*|absen\w*|miss\w*|without|lack\w*)\b"
                   r".{0,95}\bproof\b",t)
             and re.search(r"\b(?:distinguish\w*|trivial\w*|detect\w*)\b",t)):
         return "no_challenge_proof_misread_as_leak"
