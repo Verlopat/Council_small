@@ -1,10 +1,31 @@
 """Typed validation of untrusted LLM outputs; malformed roles cannot mutate state."""
 from __future__ import annotations
-from typing import Literal
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from typing import Literal, get_args, get_origin
+from pydantic import (BaseModel, ConfigDict, Field, ValidationError,
+                      field_validator, model_validator)
 
 class ModelSchema(BaseModel):
     model_config=ConfigDict(extra="ignore",str_strip_whitespace=True)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_string_lists(cls, data):
+        """Repair harmless provider str-for-list[str] errors for every role.
+
+        Keep integer lists and nested/structured values strict. Do not mutate
+        the caller's object or reinterpret arbitrary JSON objects as strings.
+        """
+        if not isinstance(data,dict):
+            return data
+        clean=dict(data)
+        for name,field in cls.model_fields.items():
+            if (name in clean and isinstance(clean[name],str)
+                    and get_origin(field.annotation) is list
+                    and get_args(field.annotation)==(str,)):
+                text=clean[name].strip()
+                clean[name]=[text] if text else []
+        return clean
+
 
 def _as_string_list(value):
     # Only lossless container normalization. Arbitrary objects and nested
@@ -139,12 +160,13 @@ class TopicPartialMatch(ModelSchema):
 
 
 class TopicJudge(ModelSchema):
-    topic:str=Field(min_length=1)
+    # The caller knows the topic; the model does not need to echo it.
+    topic:str|None=None
     versions:list[TopicVersion]=Field(default_factory=list)
     best_version_id:str|None=None
     missing:list[str]=Field(default_factory=list)
     partial_matches:list[TopicPartialMatch]=Field(default_factory=list)
-    summary:str=Field(min_length=1)
+    summary:str|None=None
 
 
 class Synthesis(ModelSchema):
