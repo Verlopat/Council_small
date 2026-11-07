@@ -84,53 +84,88 @@ def scan_audit_issues(question: str, issues: list[str]) -> list[dict]:
 # that quotes an error to criticize it should not be automatically suppressed.
 def objection_conflicts(question: str, ident: str, issue: str,
                         topic: str = "") -> list[dict]:
+    """Narrow advisory RFC conflicts in objections, not in quoted claims.
+
+    Neither a regex match nor an absence of warnings certifies correctness.
+    """
     if not re.search(r"\bVRF\b|verifiable random function",question,re.I):
         return []
     if not isinstance(issue,str):
         return []
     t=" ".join(issue.split())
-    # Don't misread quoted criticisms such as "the proposal incorrectly
-    # assumes no SK" as the reviewer's own definition.
-    quotes_error=bool(re.search(
+    trusted=bool(re.search(r"\btrusted\s+uniqueness\b",t,re.I)
+                 or topic=="2_trusted_uniqueness")
+    pseudo=bool(re.search(r"\bpseudorandom",t,re.I)
+                or topic=="3_pseudorandomness")
+    quoted_error=bool(re.search(
         r"\b(?:incorrectly|wrongly|mistakenly|invalidly|falsely|"
         r"claims?\s+that|assumes?\s+that|error\s+(?:is|in))\b",t,re.I))
-    rows=[]
-    if ((re.search(r"\btrusted\s+uniqueness\b",t,re.I) or
-         topic=="2_trusted_uniqueness") and
-        re.search(r"\b(?:without|not\s+(?:given|have|know)|lacks?)\b"
-                  r".{0,45}\b(?:SK|secret\s+key)\b",t,re.I)
-        and not quotes_error):
-        rows.append({"claim_id":ident,"kind":"contradicts_rfc_3_3",
-                     "reference":"RFC 9381 Section 3.3",
-                     "message":"Objection appears to require target SK secrecy "
-                               "in trusted uniqueness; RFC 9381 provides "
-                               "the honestly generated secret key to the adversary."})
-    pseudo=bool(re.search(r"\bpseudorandom",t,re.I) or
-                topic=="3_pseudorandomness")
-    # A correct criticism often says "the challenge must be returned without
-    # a proof, as verification would trivially distinguish a random value".
-    # That is NOT an objection requiring proof disclosure.
+    notes=[]
+    def add(kind,reference,message):
+        notes.append({"claim_id":ident,"kind":kind,"reference":reference,
+                      "message":message})
+    # An objection about an actually missing SK disclosure in the claim
+    # is not itself saying the adversary ought to lack the secret key.
+    explicitly_reports_error=bool(re.search(
+        r"\b(?:yet|however|but)\b.{0,120}"
+        r"\b(?:no\s+access|only\s+pk|not\s+given|without|lacks?)\b"
+        r".{0,45}\b(?:sk|secret\s+key)\b",t,re.I))
+    if trusted and not quoted_error and not explicitly_reports_error:
+        if re.search(r"\b(?:without|not\s+(?:given|have|know)|lacks?)\b"
+                     r".{0,45}\b(?:sk|secret\s+key)\b",t,re.I):
+            add("contradicts_rfc_3_3","RFC 9381 Section 3.3",
+                "Objection appears to require secret-key secrecy in trusted "
+                "uniqueness; the honestly generated SK is known to the adversary.")
+        key_revealed=bool(re.search(
+            r"\b(?:secret\s+key|\bsk\b)\b.{0,95}"
+            r"\b(?:reveal\w*|known|learn\w*|given|disclos\w*)\b",t,re.I))
+        key_condemned=bool(re.search(
+            r"\b(?:contradict\w*|trivial\w*|break\w*|insecure|"
+            r"violat\w*|undermin\w*)\b",t,re.I))
+        key_computation=bool(re.search(
+            r"\b(?:us\w*|comput\w*|evaluat\w*)\b.{0,75}"
+            r"\b(?:secret\s+key|\bsk\b|vrf)\b",t,re.I) and
+            re.search(r"\b(?:trivial\w*|break\w*|two\s+distinct\s+outputs?)\b",
+                      t,re.I))
+        if (key_revealed and key_condemned) or key_computation:
+            add("contradicts_rfc_3_3_sk_known","RFC 9381 Section 3.3",
+                "Knowledge or ordinary use of an honestly generated SK does "
+                "not by itself violate trusted uniqueness; a win requires "
+                "two different accepting outputs for the SAME input.")
+    # For §3.4 the challenge is deliberately output-only. Detect objections
+    # claiming that omission itself leaks the hidden bit. Do not flag a
+    # correct objection that demands withholding the proof in both worlds.
     says_must_omit=bool(re.search(
         r"\b(?:must|should|is|are)\s+(?:be\s+)?"
         r"(?:provided|given|returned|revealed|output)\s+without\b"
-        r".{0,30}\bproof\b|"
+        r".{0,40}\bproof\b|"
+        r"\b(?:must|should)\s+not\s+(?:return|reveal|provide|include)"
+        r".{0,45}\bproof\b|"
         r"\bwithout\s+(?:a|its|the)\s+proof\b.{0,40}"
-        r"\b(?:as|because|since)\b.{0,60}\bverif\w*\b"
-        r".{0,60}\b(?:distinguish\w*|trivial\w*)\b",t,re.I))
-    # Require an EXPLICIT assertion that the lack of a proof enables an
-    # adversary to distinguish; mere co-occurrence is insufficient.
-    complains_missing=bool(re.search(
+        r"\b(?:as|because|since)\b.{0,65}\bverif\w*\b"
+        r".{0,65}\b(?:distinguish\w*|trivial\w*)\b",t,re.I))
+    omitted=bool(re.search(
+        r"\b(?:omit\w*|absen\w*|miss\w*|lack\w*|without|no|reject\w*)\b"
+        r".{0,95}\bproof\b|\babsence\s+of\s+(?:a\s+)?valid\s+proof\b",t,re.I))
+    causal=bool(re.search(
+        r"\b(?:distinguish\w*|trivial\w*|detect\w*|"
+        r"distinguishing\s+advantage)\b",t,re.I))
+    # Scope guard to avoid confusing a missing proof for an unrelated
+    # oracle evaluation with the intentionally proofless target challenge.
+    challenge_scope=bool(re.search(r"\b(?:challenge|target\s+output|"
+                                   r"target\s+input|π\s*\*|pi\s*\*)\b",t,re.I))
+    direct_missing=bool(re.search(
         r"\b(?:no|without|missing|lacks?)\b.{0,40}\bproof\b"
-        r".{0,90}\b(?:adversary|it)\b.{0,45}"
-        r"\b(?:can|could|would)\b.{0,45}"
+        r".{0,90}\b(?:adversary|it)\b.{0,50}"
+        r"\b(?:can|could|would)\b.{0,50}"
         r"\b(?:distinguish\w*|trivial\w*|eas\w*)\b",t,re.I))
-    if pseudo and complains_missing and not says_must_omit and not quotes_error:
-        rows.append({"claim_id":ident,"kind":"contradicts_rfc_3_4_no_challenge_proof",
-                     "reference":"RFC 9381 Section 3.4",
-                     "message":"Objection appears to say a missing challenge "
-                               "proof makes distinguishing easy. RFC 9381 "
-                               "withholds the challenge proof intentionally."})
-    return rows
+    if pseudo and omitted and causal and (challenge_scope or direct_missing) and not (
+            says_must_omit or quoted_error):
+        add("contradicts_rfc_3_4_no_challenge_proof",
+            "RFC 9381 Section 3.4",
+            "Objection treats the deliberately omitted challenge proof as a "
+            "distinguishing leak; both challenge worlds omit it.")
+    return list({x["kind"]:x for x in notes}.values())
 
 
 def classify_objections(question: str, objections: list[dict]) -> tuple[list[dict],list[dict]]:
