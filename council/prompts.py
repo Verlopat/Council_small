@@ -145,12 +145,19 @@ No fabricated quotations. Name the best_version_id only if it is in
 versions and its claim text is at least partially relevant; otherwise null.
 The best version need not be fully correct: list what is missing, and
 summarize the best source-aligned game in 1-3 concise sentences.
-If the reference is absent or truncated, explicitly explain the
-limitation. Do not treat untested claims or model agreement as proof.
+If NO version fully matches, set best_version_id to null and provide a
+helpful corrected definition based ONLY on the reference. In partial_matches
+for EACH version, specify exactly which parts agree with the reference
+and which contradict it. Quote short source phrases verbatim; line wraps
+in RFC text are acceptable. Never mix two flawed proposals into a
+"verified" definition. If the reference is absent or truncated, explicitly
+explain the limitation. Do not treat untested claims or model agreement as proof.
 Return ONLY JSON:
 {"topic":"...","versions":[{"id":"...","status":"matches|contradicts|incomplete",
 "reference_quote":"...","reason":"..."}],
-"best_version_id":"..." or null,"missing":["..."],"summary":"..."}.""",
+"best_version_id":"..." or null,"missing":["..."],
+"partial_matches":[{"id":"...","agrees":["..."],"conflicts":["..."],
+"reference_quote":"verbatim source phrase"}],"summary":"..."}.""",
       "audit": """You are an independent auditor of the proposed research brief.
 Identify unsupported factual claims, unaddressed objections and false proof language.
 Return ONLY JSON with issues (list of strings) and suggested_checks (list of strings).
