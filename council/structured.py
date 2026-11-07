@@ -57,6 +57,40 @@ GEMINI_JUDGE_SCHEMA = {
     ],
 }
 
+# Gemini's topic judge needs a compact, explicit nested contract.
+# Topic and summary are optional because the caller already knows both
+# and the judge may return only version assessments.
+GEMINI_TOPIC_JUDGE_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "topic": {"type": "STRING"},
+        "summary": {"type": "STRING"},
+        "versions": {"type": "ARRAY", "items": {
+            "type": "OBJECT", "properties": {
+                "id": {"type": "STRING"},
+                "status": {"type": "STRING",
+                           "enum": ["matches", "contradicts", "incomplete"]},
+                "reference_quote": {"type": "STRING"},
+                "reason": {"type": "STRING"}},
+            "required": ["id", "status", "reason"],
+            "propertyOrdering": ["id", "status", "reference_quote", "reason"]}},
+        "best_version_id": {"type": "STRING", "nullable": True},
+        "missing": {"type": "ARRAY", "items": {"type": "STRING"}},
+        "partial_matches": {"type": "ARRAY", "items": {
+            "type": "OBJECT", "properties": {
+                "id": {"type": "STRING"},
+                "agrees": {"type": "ARRAY", "items": {"type": "STRING"}},
+                "conflicts": {"type": "ARRAY", "items": {"type": "STRING"}},
+                "reference_quote": {"type": "STRING"}},
+            "required": ["id"],
+            "propertyOrdering": ["id", "agrees", "conflicts", "reference_quote"]}},
+    },
+    "required": ["versions"],
+    "propertyOrdering": ["topic", "versions", "best_version_id",
+                         "missing", "partial_matches", "summary"],
+}
+
+
 def response_format(provider: str, model: str, role: str) -> dict | None:
     if provider == "Cohere":
         # Chat v2: response_format={type:json_object,schema:...}
@@ -72,6 +106,11 @@ def response_format(provider: str, model: str, role: str) -> dict | None:
                 return None
             return {"type": "gemini_response_schema",
                     "schema": GEMINI_JUDGE_SCHEMA}
+        if role == "topic_judge":
+            if os.getenv("COUNCIL_GEMINI_TOPIC_JUDGE_SCHEMA", "1") == "0":
+                return None
+            return {"type": "gemini_response_schema",
+                    "schema": GEMINI_TOPIC_JUDGE_SCHEMA}
         return None
     if provider != "Groq" or not model.startswith("openai/gpt-oss-"):
         return None
