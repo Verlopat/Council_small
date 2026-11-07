@@ -160,7 +160,8 @@ class FamilyTransport:
                     except CandidateError as exc:
                         transient=exc.kind in {"timeout", "server", "connection"}
                         truncated=(exc.kind=="output_truncated" and
-                                   role in {"proposal","repair"} and
+                                   role in {"proposal","repair","extract",
+                                            "review","revision","hunter"} and
                                    output_tokens < 16384)
                         if attempt_no or not (transient or truncated):
                             raise
