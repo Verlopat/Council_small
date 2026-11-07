@@ -5,6 +5,7 @@ objection or resolve it, and are separate from verified counterexamples.
 """
 from __future__ import annotations
 import re
+from difflib import SequenceMatcher
 from types import SimpleNamespace
 from council.vrf_sanity import scan_vrf_games
 
@@ -204,12 +205,26 @@ POST_CHALLENGE = re.compile(
     r"\b(?:cannot|must\s+not|forbid\w*|disallow\w*)\b"
     r".{0,50}\bquer\w*\b",re.I)
 SK_DISCLOSED = re.compile(
-    r"\bgives?\s+(?:both\s+)?pk\s+and\s+sk\b|"
-    r"\b(?:adversary|attacker)\s+"
-    r"(?:receives|is\s+given|gets|knows)\s+"
-    r".{0,45}\b(?:sk|secret\s+key)\b|"
-    r"\bgives?\s+(?:the\s+)?adversary\s+"
-    r".{0,45}\b(?:sk|secret\s+key)\b",re.I)
+    # A positive grant is required. "given only pk (never sk)" must NOT match.
+    r"\b(?:gives?\s+both\s+pk\s+and\s+sk|"
+    r"(?:adversary|attacker)\s+"
+    r"(?:is\s+given|receives|gets|knows|may\s+know)\s+"
+    r"(?:(?!\b(?:not|never|without|only\s+pk)\b).){0,55}"
+    r"\b(?:sk|secret\s+key)\b|"
+    r"gives?\s+(?:the\s+)?adversary\s+"
+    r"(?:(?!\b(?:not|never|without|only\s+pk)\b).){0,55}"
+    r"\b(?:sk|secret\s+key)\b)",re.I)
+MALFORMED_PK = re.compile(
+    r"\b(?:malform\w*|malicious|arbitrary)\b.{0,75}"
+    r"\b(?:public\s+key|pk)\b|"
+    r"\b(?:public\s+key|pk)\b.{0,65}"
+    r"\b(?:malform\w*|malicious|arbitrary)\b",re.I)
+FULL_PK_SCOPE = re.compile(
+    r"\b(?:malicious|arbitrary|any\s+(?:possible\s+)?public|"
+    r"adversarially\s+(?:chosen|selected))\b.{0,55}"
+    r"\b(?:public\s+key|pk|keys?)\b|"
+    r"\b(?:public\s+key|pk|keys?)\b.{0,55}"
+    r"\b(?:malicious|arbitrary|adversarially)\b",re.I)
 
 
 def partition_addressed_objections(objections: list[dict]) -> tuple[list[dict],list[dict]]:
@@ -221,7 +236,9 @@ def partition_addressed_objections(objections: list[dict]) -> tuple[list[dict],l
     addressed,unresolved=[],[]
     for item in objections:
         issue=str(item.get("issue") or "")
-        target=str(item.get("target_text") or "")
+        # Use the claimed STATEMENT only; an associated raw source quote can
+        # contain the negative phrasing the objection is criticizing.
+        target=str(item.get("target_statement") or item.get("target_text") or "")
         topic=item.get("topic","")
         correction=None
         if topic=="3_pseudorandomness" and re.search(
@@ -244,9 +261,23 @@ def partition_addressed_objections(objections: list[dict]) -> tuple[list[dict],l
         if not correction and topic=="2_trusted_uniqueness" and re.search(
             r"\b(?:not|never|missing|lacks?|without|only\s+pk)\b"
             r".{0,65}\b(?:sk|secret\s+key)\b",issue,re.I):
-            if SK_DISCLOSED.search(target):
+            if (SK_DISCLOSED.search(target) and not SK_DISCLOSED.search(issue)
+                    and not re.search(r"\b(?:never|not|only\s+pk)\b"
+                                      r".{0,45}\b(?:revealed|given|knows?)\b"
+                                      r".{0,45}\b(?:sk|secret\s+key)\b",
+                                      target,re.I)):
                 correction="target_secret_key_disclosed"
-        clean={k:v for k,v in item.items() if k!="target_text"}
+        if (not correction and topic=="1_full_uniqueness"
+                and MALFORMED_PK.search(issue)
+                and re.search(r"\b(?:verify|verification|accept|outputs?)\b",
+                              issue,re.I)
+                and FULL_PK_SCOPE.search(target)):
+            # A malicious public key making two different outputs verify
+            # would be an attack against full uniqueness. The definition
+            # already quantifies over that key, not excludes it.
+            correction="malformed_pk_is_covered_by_full_uniqueness"
+        clean={k:v for k,v in item.items()
+               if k not in {"target_text","target_statement"}}
         if correction:
             addressed.append(dict(clean,
                 advisory_status="already_addressed_by_claim",
@@ -254,3 +285,54 @@ def partition_addressed_objections(objections: list[dict]) -> tuple[list[dict],l
         else:
             unresolved.append(clean)
     return addressed,unresolved
+
+def _objection_signature(issue: str) -> str | None:
+    """Specific repeated reviewer misconceptions despite wording changes."""
+    t=" ".join(issue.split()).casefold()
+    if (MALFORMED_PK.search(t) and
+            re.search(r"\b(?:verify|verification|accept|outputs?)\b",t)):
+        return "malformed_pk_verifies_everything"
+    if (re.search(r"\b(?:proofs?|π1|π2|pi1|pi2)\b",t)
+            and re.search(r"\b(?:valid|same\s+verif|verify|verification)\b",t)
+            and re.search(r"\b(?:lack|not|missing|arbitrary|trivial|require)\b",t)):
+        return "proofs_missing_validity_requirement"
+    if (re.search(r"\b(?:secret\s+key|\bsk\b)\b",t)
+            and re.search(r"\b(?:comput\w*|us\w*|evaluat\w*)\b",t)
+            and re.search(r"\b(?:trivial|break\w*|two\s+distinct)\b",t)):
+        return "sk_computation_misread_as_uniqueness_break"
+    if (re.search(r"\b(?:omit\w*|absen\w*|miss\w*|without|lack\w*)\b"
+                  r".{0,95}\bproof\b",t)
+            and re.search(r"\b(?:distinguish\w*|trivial\w*|detect\w*)\b",t)):
+        return "no_challenge_proof_misread_as_leak"
+    return None
+
+
+def deduplicate_objections(objections: list[dict], threshold: float = 0.90) -> list[dict]:
+    """Display one representative per objection, retain all IDs/provenance.
+
+    Similarity alone does not prove two criticisms are logically equivalent.
+    Narrow signature matching covers common rephrasings of the same exact
+    technical failure; the full original list is preserved in the run ledger.
+    """
+    distinct=[]
+    for item in objections:
+        statement=str(item.get("issue") or "")
+        normalized=" ".join(statement.casefold().split())
+        signature=_objection_signature(statement)
+        match=None
+        for existing in distinct:
+            previous=" ".join(str(existing.get("issue") or "").casefold().split())
+            previous_signature=_objection_signature(previous)
+            same_specific_concern=(signature is not None and signature==previous_signature)
+            if (same_specific_concern or
+                    (item.get("topic")==existing.get("topic") and
+                     SequenceMatcher(None,normalized,previous,autojunk=False).ratio()
+                     >=threshold)):
+                match=existing
+                break
+        if match is None:
+            distinct.append(dict(item,duplicate_ids=list(item.get("duplicate_ids") or [])))
+        else:
+            match["duplicate_ids"].append(item.get("id"))
+            match["duplicate_ids"].extend(item.get("duplicate_ids") or [])
+    return distinct
