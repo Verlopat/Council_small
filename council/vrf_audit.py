@@ -63,3 +63,65 @@ def scan_audit_issues(question: str, issues: list[str]) -> list[dict]:
         rows.extend(scan_vrf_games(question,[
             SimpleNamespace(id=ident,statement=issue)]))
     return list({(r["claim_id"],r["kind"]):r for r in rows}.values())
+
+
+# These patterns flag *possible* faulty reviewer assertions. An objection
+# that quotes an error to criticize it should not be automatically suppressed.
+def objection_conflicts(question: str, ident: str, issue: str,
+                        topic: str = "") -> list[dict]:
+    if not re.search(r"\bVRF\b|verifiable random function",question,re.I):
+        return []
+    if not isinstance(issue,str):
+        return []
+    t=" ".join(issue.split())
+    # Don't misread quoted criticisms such as "the proposal incorrectly
+    # assumes no SK" as the reviewer's own definition.
+    quotes_error=bool(re.search(
+        r"\b(?:incorrectly|wrongly|mistakenly|invalidly|falsely|"
+        r"claims?\s+that|assumes?\s+that|error\s+(?:is|in))\b",t,re.I))
+    rows=[]
+    if ((re.search(r"\btrusted\s+uniqueness\b",t,re.I) or
+         topic=="2_trusted_uniqueness") and
+        re.search(r"\b(?:without|not\s+(?:given|have|know)|lacks?)\b"
+                  r".{0,45}\b(?:SK|secret\s+key)\b",t,re.I)
+        and not quotes_error):
+        rows.append({"claim_id":ident,"kind":"contradicts_rfc_3_3",
+                     "reference":"RFC 9381 Section 3.3",
+                     "message":"Objection appears to require target SK secrecy "
+                               "in trusted uniqueness; RFC 9381 provides "
+                               "the honestly generated secret key to the adversary."})
+    if ((re.search(r"\bpseudorandom",t,re.I) or
+         topic=="3_pseudorandomness") and
+        re.search(r"\b(?:no|without|reject\w*)\b.{0,60}\bproof\b"
+                  r".{0,115}\b(?:distinguish\w*|eas\w*|trivial\w*)\b",t,re.I)
+        and not quotes_error and not re.search(
+            r"\b(?:does\s+not|cannot|not)\b.{0,30}"
+            r"\b(?:distinguish|easy|trivial)\b",t,re.I)):
+        rows.append({"claim_id":ident,"kind":"contradicts_rfc_3_4_no_challenge_proof",
+                     "reference":"RFC 9381 Section 3.4",
+                     "message":"Objection appears to assume the random challenge "
+                               "should expose a validating proof; RFC 9381 "
+                               "reveals only the challenge output."})
+    return rows
+
+
+def classify_objections(question: str, objections: list[dict]) -> tuple[list[dict],list[dict]]:
+    """Partition advisory RFC conflicts from other objections, preserving raw text.
+
+    No objection is deleted from the audit trail and these heuristics do not
+    establish correctness or proof.
+    """
+    flagged,remaining=[],[]
+    for item in objections:
+        ident=item.get("id","")
+        issue=item.get("issue","")
+        # Execute the ordinary VRF sanity pass on every objection as a
+        # separate advisory surface; only narrow RFC conflict categories
+        # change how the objection is DISPLAYED.
+        game_warnings=scan_vrf_games(question,[
+            SimpleNamespace(id=ident,statement=issue)])
+        conflict=objection_conflicts(question,ident,issue,item.get("topic",""))
+        value=dict(item,vrf_warnings=list({
+            x["kind"] for x in game_warnings+conflict}))
+        (flagged if conflict else remaining).append(value)
+    return flagged,remaining

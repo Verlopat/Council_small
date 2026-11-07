@@ -18,7 +18,8 @@ from council.dependencies import Dependency
 from council.bus import MessageCap, MessageBus
 from council.evidence import EvidenceRejected
 from council.extract import validate_anchor, locate_source_span, numbered_sentence_excerpt, suggest_duplicate_claims
-from council.judge import blind_ledger, enforce_verdict, judge_failure
+from council.judge import (blind_ledger, enforce_verdict, judge_failure,
+                           topic_of, TOPIC_SECTIONS, normalize_topic_judgment)
 from council.claim_filter import is_meta_claim, close_to_owner
 from council.ledger import SQLiteLedger
 from council.models import Claim, ClaimStatus, Evidence, EvidenceKind, ResearchResult, Objection, AuthorResponse
@@ -32,7 +33,7 @@ from council.compose import compose_answer
 from council.workflow import CouncilRunner
 from council.requirements import Requirements
 from council.vrf_sanity import scan_vrf_games
-from council.vrf_audit import scan_audit_issues
+from council.vrf_audit import scan_audit_issues, classify_objections
 from council.definition_sources import classify as definition_kind, consult as consult_definition, is_summary, topic_text
 
 # Four-solvers variant would leave no reliable independently reserved auditing
@@ -455,11 +456,12 @@ class FullCouncilRunner(CouncilRunner):
                     covered_kinds.add(label)
         for p in proposals:
             approach=p["approach"]
+            # [S1], [S2] and [S3] can share a physical line.
             parts=[
                 (int(m.group(1)),m.group(2).strip())
                 for m in re.finditer(
-                    r"(?ms)^\s*\[S([0-9]+)\]\s+(.+?)(?=^\s*\[S[0-9]+\]|\Z)",
-                    approach)]
+                    r"(?s)(?<!\S)\[S([0-9]+)\]\s+(.+?)"
+                    r"(?=\s+\[S[0-9]+\]|\Z)", approach)]
             if not parts:
                 parts=[(i,chunk.strip()) for i,chunk in enumerate(
                     re.split(r"(?<=[.!?])\s+",approach),1) if chunk.strip()]
@@ -483,6 +485,44 @@ class FullCouncilRunner(CouncilRunner):
                         findings.append(item)
                         covered_kinds.add(label)
         return findings
+
+    async def _consolidate_topics(self, question: str, warnings: list[dict]) -> list[dict]:
+        """Three bounded RFC-game comparisons; never upgrade evidence."""
+        if not re.search(r"\bVRF\b|verifiable random function", question, re.I):
+            return []
+        warning_map={}
+        for w in warnings:
+            warning_map.setdefault(w["claim_id"].split(":source")[0],set()).add(w["kind"])
+        out=[]
+        for topic,(group,section) in TOPIC_SECTIONS.items():
+            claims=[c for c in self.ledger.claims.values()
+                    if topic_of(c.statement)==group and c.id.startswith("p")
+                    and not getattr(c,"duplicate_of",None)]
+            versions=[{"id":c.id,"statement":c.statement[:1000],
+                       "flags":sorted(warning_map.get(c.id,set()))}
+                      for c in claims[:18]]
+            excerpt=None
+            if self.paper_index is not None:
+                try:
+                    excerpt=self.paper_index.rfc_section_excerpt(section,max_chars=6000)
+                except (AttributeError,ValueError):
+                    pass
+            candidate=None
+            if (versions and excerpt and not excerpt.get("truncated")
+                    and self.budget.debate_remaining()>8):
+                candidate=await self._call(self.judge_family,"topic_judge",{
+                    "topic":topic,"section":section,"reference":excerpt,
+                    "versions":versions,
+                    "task":"Compare every version to the exact source text; "
+                           "choose the best source-aligned description. "
+                           "Do not claim formal verification."}, synthesis=True)
+            result=normalize_topic_judgment(topic,excerpt,versions,candidate)
+            self.events.record("topic_consolidation",topic=topic,
+                section=section,best_version_id=result["best_version_id"],
+                reference_complete=result["reference_complete"],
+                model_available=bool(candidate))
+            out.append(result)
+        return out
 
     def _stop_for_independence(self,question:str,req:Requirements,
                                proposals:list[dict])->dict:
@@ -566,11 +606,35 @@ class FullCouncilRunner(CouncilRunner):
                 continue
             owned=[self.ledger.claims[cid] for cid in owner["claim_ids"]
                    if cid in self.ledger.claims]
-            duplicate=close_to_owner(statement,anchored.source_span,owned)
+            duplicate=close_to_owner(statement,owned)
+            near=duplicate or close_to_owner(statement,owned,threshold=0.85)
+            if near:
+                original=self.ledger.claims[near]
+                if not original.source_span or original.needs_re_evaluation:
+                    try:
+                        # Confirm the rival span is truly present in the
+                        # original answer; similarity is NOT verification.
+                        recovered=validate_anchor(answer,original.statement,
+                            anchored.source_span,assumptions=original.assumptions)
+                    except ValueError:
+                        # A rival assertion with different quantifiers/meaning
+                        # must not be silently discarded.
+                        duplicate=None
+                    else:
+                        if not original.source_span:
+                            original.source_span=recovered.source_span
+                            original.anchor_method="rival_sentence_match"
+                            original.quantifiers=list(recovered.quantifiers)
+                        original.needs_re_evaluation=True
+                        self.events.record("claim_anchor_recovered",
+                            claim_id=original.id,method="rival_sentence_match",
+                            semantic_alignment="unchecked")
+                        duplicate=near
             if duplicate:
                 self.events.record("rival_claim_duplicate_skipped",
                     proposal_id=owner["id"],duplicate_of=duplicate,
-                    similarity_policy="high_text_similarity_or_exact_source_coverage")
+                    similarity_policy="statement_similarity_only",
+                    semantic_equivalence="not_verified")
                 continue
             cid=owner["id"]+":r"+str(len(self.ledger.claims)+1)
             c=Claim(cid,1,statement,owner["family"],source_span=span,
@@ -653,19 +717,22 @@ class FullCouncilRunner(CouncilRunner):
             for family in self.solvers])
         for index,(family,body) in enumerate(zip(self.solvers,raw),1):
             if body is None:continue
-            if "VRF" in question.upper() or "verifiable random function" in question.lower():
-                distinct=[c for c in body.get("claims",[])
-                          if not (is_summary(c.get("statement","")) or
-                                  is_meta_claim(c.get("statement","")))]
-                removed=len(body.get("claims",[]))-len(distinct)
-                if removed:
-                    self.events.record("summary_or_meta_claims_filtered",
-                        family=family,removed=removed)
-                    if not distinct:
-                        self.warnings.append(
-                            "proposal/"+family+": no substantive claims after filtering")
-                        continue
-                    body=dict(body,claims=distinct)
+            is_vrf=("vrf" in question.casefold() or
+                    "verifiable random function" in question.casefold())
+            # Self-referential claims are not domain claims for ANY question.
+            # Also omit generic VRF summary lines that duplicate real claims.
+            distinct=[c for c in body.get("claims",[])
+                      if not is_meta_claim(c.get("statement","")) and
+                      not (is_vrf and is_summary(c.get("statement","")))]
+            removed=len(body.get("claims",[]))-len(distinct)
+            if removed:
+                self.events.record("summary_or_meta_claims_filtered",
+                    family=family,removed=removed)
+                if not distinct:
+                    self.warnings.append(
+                        "proposal/"+family+": no substantive claims after filtering")
+                    continue
+                body=dict(body,claims=distinct)
             try:
                 p=self._proposal(family,body,index)
                 self._anchors(p,body)
@@ -715,7 +782,7 @@ class FullCouncilRunner(CouncilRunner):
             if not review:continue
             try: rows=item_list(review,"objections")
             except OutputError:continue
-            for raw_ob in rows:
+            for raw_ob in rows[:4]:
                 try:
                     claimed=require_string(raw_ob,"claim_id")
                     cid=p["claim_map"].get(claimed,claimed)
@@ -794,7 +861,7 @@ class FullCouncilRunner(CouncilRunner):
                 "review_phase":"independent_revision_recheck"})
             if followup:
                 try:
-                    for raw_ob in item_list(followup,"objections"):
+                    for raw_ob in item_list(followup,"objections")[:4]:
                         claimed=require_string(raw_ob,"claim_id")
                         cid=p["claim_map"].get(claimed,claimed)
                         if cid not in p["claim_ids"]:continue
@@ -882,7 +949,7 @@ class FullCouncilRunner(CouncilRunner):
             if definition is not None and self.paper_index is not None:
                 try:
                     excerpt=self.paper_index.rfc_section_excerpt(
-                        definition[1],max_chars=1000)
+                        definition[1],max_chars=2400)
                 except (ValueError,AttributeError):
                     excerpt=None
             suggestion=await self._call(repairer,"repair",{
@@ -1015,7 +1082,7 @@ class FullCouncilRunner(CouncilRunner):
             for section in ("3.1","3.3","3.4"):
                 try:
                     excerpt=self.paper_index.rfc_section_excerpt(
-                        section,max_chars=900)
+                        section,max_chars=6000)
                 except (AttributeError,ValueError):
                     excerpt=None
                 if excerpt:
@@ -1105,7 +1172,11 @@ class FullCouncilRunner(CouncilRunner):
             [cid+": independent verification required"
              for cid in verdict["blocking"]
              if cid!="composition:1"], self.ledger.claims)
+        # Consolidate before the optional auditor spends the remaining quota.
+        topic_consolidation=(await self._consolidate_topics(question,advisory_findings)
+                             if mode=="full" else [])
         audit=None
+        issues=[]
         audit_advisories=[]
         if mode!="quick" and self.auditor_family is not None:
             # The auditor sees only model-authored research claims, source
@@ -1138,6 +1209,24 @@ class FullCouncilRunner(CouncilRunner):
             try:
                 issues=string_list(audit,"issues")
                 audit_advisories=scan_audit_issues(question,issues)
+                existing={(row["claim_id"],row["kind"])
+                          for row in advisory_findings}
+                unique=[]
+                for row in audit_advisories:
+                    # Auditors may explicitly reference a model claim ID;
+                    # use it to avoid printing an already-known warning.
+                    ident=row["claim_id"]
+                    match=re.fullmatch(r"audit:([0-9]+)",ident)
+                    if match and int(match.group(1)) <= len(issues):
+                        cited=re.search(r"\bp[0-9]+:(?:c|r)[0-9]+(?::repair)?\b",
+                                        issues[int(match.group(1))-1])
+                        if cited and cited.group() in self.ledger.claims:
+                            row=dict(row,claim_id=cited.group())
+                    key=(row["claim_id"],row["kind"])
+                    if key not in existing:
+                        unique.append(row)
+                        existing.add(key)
+                audit_advisories=unique
                 if audit_advisories:
                     self.events.record("audit_game_red_flags",
                         findings=audit_advisories,
@@ -1164,6 +1253,21 @@ class FullCouncilRunner(CouncilRunner):
                 brief.next_actions.append(
                     "Reserved auditor failed during this run ("+
                     reason[:200]+"); check provider health or retry later")
+        # Categorize suspicious review/audit claims without throwing away
+        # unverified objections or treating pattern matches as proofs.
+        all_objections=[{"id":o.id,"claim_id":o.claim_id,"source":"reviewer",
+                         "topic":topic_of(self.ledger.claims[o.claim_id].statement)
+                         if o.claim_id in self.ledger.claims else "",
+                         "issue":o.issue} for o in self.objections]
+        all_objections += [{"id":"audit:"+str(i),"source":"auditor",
+                            "issue":issue}
+                           for i,issue in enumerate(issues if audit else [],1)]
+        rfc_conflicts, still_open=classify_objections(question,all_objections)
+        brief.unresolved_objections=list(dict.fromkeys(
+            self.coverage+
+            [row["id"]+": "+row["issue"]+
+             (" (not independently resolved)" if row["source"]=="reviewer" else "")
+             for row in still_open]))
         brief.completion_status=("partial" if proposals else "unresolved")
         brief.limitations=list(dict.fromkeys(brief.limitations+self.warnings))
         result={"research_result":brief.to_dict(),"proposals":proposals,
@@ -1177,6 +1281,8 @@ class FullCouncilRunner(CouncilRunner):
             "stalemates":self.moderator.bus.stalemates(),
             "advisory_findings":advisory_findings,
             "audit_advisory_findings":audit_advisories,
+            "rfc_conflicting_objections":rfc_conflicts,
+            "topic_consolidation":topic_consolidation,
             "reference_checks":self.reference_checks,
             "judge_source":("local_policy" if local_judge else
                             "unavailable" if judge_unavailable else "model"),

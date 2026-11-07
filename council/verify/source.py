@@ -58,37 +58,47 @@ class PaperIndex:
                             hashlib.sha256(quote.encode()).hexdigest(),
                             "Exact passage located; no semantic entailment or factual truth established")
 
-    def rfc_section_excerpt(self, section: str, *, max_chars: int = 900) -> dict | None:
-        """Return a bounded, verbatim excerpt from an indexed official RFC.
+    def rfc_section_excerpt(self, section: str, *, max_chars: int = 6000) -> dict | None:
+        """Return a verbatim RFC 9381 section, bounded at the NEXT section.
 
-        Heading lookup and excerpt retrieval establish provenance, NOT that
-        any generated claim is correct. Do not return text from arbitrary
-        uploaded documents mislabeled as RFC 9381.
+        An excerpt is provenance only, not semantic entailment. The explicit
+        truncation flag prevents an LLM from mistaking partial reference text
+        for an exhaustive definition.
         """
         import re
-        if section not in {"3.1","3.3","3.4"} or not 300 <= max_chars <= 1500:
+        if section not in {"3.1", "3.3", "3.4"} or not 300 <= max_chars <= 10000:
             raise ValueError("Invalid RFC section/excerpt request")
         with self.lock:
-            row=self.db.execute(
+            row = self.db.execute(
                 "SELECT source_uri,content,content_hash FROM papers WHERE id=?",
                 ("rfc9381",)).fetchone()
         if not row or row[0] != "https://www.rfc-editor.org/rfc/rfc9381.txt":
             return None
-        headings={"3.1":"Full Uniqueness","3.3":"Trusted Uniqueness",
-                  "3.4":"Full Pseudorandomness"}
-        content=row[1]
-        pattern=r"(?m)^\s*"+re.escape(section)+r"\.\s+"+headings[section]+r"\s*$"
-        matches=list(re.finditer(pattern,content))
+        headings = {"3.1": "Full Uniqueness",
+                    "3.3": "Trusted Uniqueness and Trusted Collision Resistance",
+                    "3.4": "Full Pseudorandomness or Selective Pseudorandomness"}
+        title = headings[section]
+        content = row[1]
+        pattern = (r"(?m)^[ \t]*" + re.escape(section) +
+                   r"\.[ \t]+" + re.escape(title) + r"[ \t]*$")
+        matches = list(re.finditer(pattern, content))
         if not matches:
             return None
-        # Last exact-line match avoids any table-of-contents occurrence.
-        start=matches[-1].start()
-        following=content[start:start+max_chars]
-        return {"section":section,"title":headings[section],
-                "document_id":"rfc9381","source_uri":row[0],
-                "document_sha256":row[2],
-                "excerpt":following,
-                "truncated":start+max_chars<len(content)}
+        # The final heading is in the document, not the table of contents.
+        heading = matches[-1]
+        rest = content[heading.end():]
+        next_section = re.search(
+            r"(?m)^[ \t]*3\.[0-9]+\.[ \t]+[A-Z][^\r\n]*$", rest)
+        end = (heading.end() + next_section.start()
+               if next_section is not None else len(content))
+        section_text = content[heading.start():end].strip()
+        if not section_text:
+            return None
+        return {"section": section, "title": title,
+                "document_id": "rfc9381", "source_uri": row[0],
+                "document_sha256": row[2],
+                "excerpt": section_text[:max_chars],
+                "truncated": len(section_text) > max_chars}
 
     def close(self):
         with self.lock:

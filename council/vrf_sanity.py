@@ -305,7 +305,14 @@ def scan_vrf_games(question: str, claims) -> list[dict]:
                                "oracle responses rather than only the "
                                "fresh challenge output; inspect oracle rules.",
                 })
-        if PSEUDO.search(text) and re.search(r"\bgame\b",text,re.I):
+        # Advantage formulas are not stand-alone game interfaces; do not
+        # flag missing oracle/freshness merely because a formula says 'game'.
+        describes_game=(bool(re.search(
+            r"\b(?:challeng(?:e|er)|oracle|quer(?:y|ied|ies)|game)\b",
+            text,re.I)) and not bool(re.search(
+            r"\badvantage\b.{0,150}(?:pr\s*\[|probability)",
+            text,re.I)))
+        if PSEUDO.search(text) and describes_game:
             if (re.search(r"\bPRF\s+(?:output\s+)?distribution\b",text,re.I)
                     and not re.search(r"\buniform(?:ly)?\s+random\b",text,re.I)):
                 findings.append({
@@ -408,6 +415,20 @@ def scan_vrf_games(question: str, claims) -> list[dict]:
                            "output is a uniqueness-style condition, not the "
                            "usual honest-evaluation correctness property.",
             })
+
+        # Conditional win probabilities are not automatically the VRF
+        # distinguishing advantage. This is advisory, not a formal parser.
+        win_cond=re.findall(
+            r"\bPr\s*\[\s*[^\]]*\bwins?\b\s*\|\s*b\s*=\s*[01]\s*\]",
+            statement,re.I)
+        if re.search(r"\badvantage\b",statement,re.I) and len(win_cond)>=2:
+            findings.append({
+                "claim_id":cid,"kind":"advantage_on_win",
+                "message":"The proposed advantage compares conditional "
+                          "win probabilities. State a single distinguishing "
+                          "event: |Pr[b'=1|b=0] - Pr[b'=1|b=1]|, "
+                          "or |Pr[b'=b] - 1/2| with the proper convention.",
+                "reference":"RFC 9381 Section 3.4"})
     # Only report each particular concern once per claim.
     return list({(row["claim_id"], row["kind"]): row
                  for row in findings}.values())

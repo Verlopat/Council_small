@@ -124,6 +124,21 @@ class Judge(ModelSchema):
     blocking:list[str]=Field(default_factory=list)
     basis:list[str]=Field(default_factory=list)
 
+class TopicVersion(ModelSchema):
+    id:str=Field(min_length=1)
+    status:Literal["matches","contradicts","incomplete"]
+    reference_quote:str=""
+    reason:str=Field(min_length=1)
+
+
+class TopicJudge(ModelSchema):
+    topic:str=Field(min_length=1)
+    versions:list[TopicVersion]=Field(default_factory=list)
+    best_version_id:str|None=None
+    missing:list[str]=Field(default_factory=list)
+    summary:str=Field(min_length=1)
+
+
 class Synthesis(ModelSchema):
     proposed_approach:str=Field(min_length=1)
     supported_findings:list[str]=Field(default_factory=list)
@@ -153,6 +168,7 @@ class Repair(ModelSchema):
 
 SCHEMAS={
     "proposal":Proposal, "review":Review, "revision":Revision,
+    "topic_judge":TopicJudge,
     "translate":Translation, "hunter":Hunter, "judge":Judge,
     "synthesis":Synthesis, "audit":Audit,
     "coverage":Coverage,"relevance":Relevance,"repair":Repair,

@@ -97,7 +97,10 @@ class FamilyTransport:
                     raise ValueError(
                         "COUNCIL_TRANSLATOR_MAX_TOKENS must be 256..8192")
             else:
-                output_tokens = 2800 if role == "proposal" else 1800
+                role_tokens = {"proposal": 2800, "review": 3000,
+                               "revision": 3500, "repair": 2500,
+                               "topic_judge": 2100}
+                output_tokens = role_tokens.get(role, 1800)
             if entry.max_tokens is not None:
                 output_tokens = max(output_tokens, entry.max_tokens)
             estimated_tokens=max(1,len(message)//3)+output_tokens

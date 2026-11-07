@@ -228,6 +228,23 @@ def main(argv=None) -> int:
     else:
         brief = result["research_result"]
         print("\nRun: " + run_id + " | status: " + brief["completion_status"])
+        topics=result.get("topic_consolidation") or []
+        if topics:
+            print("\nBest answer per game (RFC 9381 alignment; advisory, NOT verified):")
+            for row in topics:
+                topic=row.get("topic","").replace("_"," ").title()
+                best=row.get("best_version_id")
+                if best:
+                    print("- "+topic+" [§"+str(row.get("section"))+"]: "+
+                          str(row.get("summary") or "")[:550])
+                    print("  Best source-aligned claim: "+best+" — "+
+                          str(row.get("best_statement") or "")[:220])
+                else:
+                    print("- "+topic+": No source-aligned version selected "
+                          "(reference or model comparison unavailable/incomplete).")
+                missing=row.get("missing") or []
+                if missing:
+                    print("  Missing: "+"; ".join(str(x) for x in missing[:3]))
         coverage = result.get("role_coverage")
         if isinstance(coverage, dict) and args.mode == "full":
             expected = coverage.get("requested_solvers", [])
@@ -260,6 +277,13 @@ def main(argv=None) -> int:
         print("\nHypotheses:\n" + "\n".join("- " + x for x in brief["hypotheses"]))
         print("\nUnresolved reviewer objections:\n" + (
             "\n".join("- " + x for x in brief["unresolved_objections"]) or "(none)"))
+        conflicts=result.get("rfc_conflicting_objections") or []
+        if conflicts:
+            print("\nObjections that may conflict with RFC 9381 "
+                  "(advisory heuristic; inspect before dismissing):\n"+
+                  "\n".join("- "+str(c.get("id"))+": "+str(c.get("issue"))+
+                            " ["+", ".join(c.get("vrf_warnings",[]))+"]"
+                            for c in conflicts))
         advisory = result.get("advisory_findings", [])
         print("\nAutomated security-game warnings (advisory only):\n" + (
             "\n".join("- " + str(item.get("claim_id", "")) + ": " +
@@ -267,9 +291,13 @@ def main(argv=None) -> int:
             or "(none detected; this does not establish correctness)"))
         audit_advisories=result.get("audit_advisory_findings",[])
         if audit_advisories:
-            print("\nAuditor security-game warnings (advisory only):\n" +
-                  "\n".join("- " + str(x.get("claim_id","")) + ": " +
-                            str(x.get("message","")) for x in audit_advisories))
+            already={(x.get("claim_id"),x.get("kind")) for x in advisory}
+            unique=[x for x in audit_advisories
+                    if (x.get("claim_id"),x.get("kind")) not in already]
+            if unique:
+                print("\nAuditor security-game warnings (advisory only):\n" +
+                      "\n".join("- " + str(x.get("claim_id","")) + ": " +
+                                str(x.get("message","")) for x in unique))
         references = result.get("reference_checks", [])
         if references:
             print("\nLocal RFC source lookups (provenance only):\n" +
