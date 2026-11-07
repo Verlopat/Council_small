@@ -33,7 +33,8 @@ from council.compose import compose_answer
 from council.workflow import CouncilRunner
 from council.requirements import Requirements
 from council.vrf_sanity import scan_vrf_games
-from council.vrf_audit import scan_audit_issues, classify_objections
+from council.vrf_audit import (scan_audit_issues, classify_objections,
+                               partition_addressed_objections)
 from council.definition_sources import classify as definition_kind, consult as consult_definition, is_summary, topic_text
 
 # Four-solvers variant would leave no reliable independently reserved auditing
@@ -1274,14 +1275,30 @@ class FullCouncilRunner(CouncilRunner):
                     reason[:200]+"); check provider health or retry later")
         # Categorize suspicious review/audit claims without throwing away
         # unverified objections or treating pattern matches as proofs.
+        def target_text(cid):
+            claim=self.ledger.claims.get(cid)
+            if not claim:
+                return ""
+            return claim.statement+"\n"+(claim.source_span or "")
         all_objections=[{"id":o.id,"claim_id":o.claim_id,"source":"reviewer",
                          "topic":topic_of(self.ledger.claims[o.claim_id].statement)
                          if o.claim_id in self.ledger.claims else "",
+                         "target_text":target_text(o.claim_id),
                          "issue":o.issue} for o in self.objections]
-        all_objections += [{"id":"audit:"+str(i),"source":"auditor",
-                            "issue":issue}
-                           for i,issue in enumerate(issues if audit else [],1)]
-        rfc_conflicts, still_open=classify_objections(question,all_objections)
+        for i,issue in enumerate(issues if audit else [],1):
+            match=re.search(r"\bp[0-9]+:(?:c|r)[0-9]+(?::repair)?\b",issue)
+            cid=match.group() if match else None
+            claim=self.ledger.claims.get(cid) if cid else None
+            all_objections.append({
+                "id":"audit:"+str(i),"source":"auditor",
+                "claim_id":cid,
+                "topic":topic_of(claim.statement) if claim else "",
+                "target_text":target_text(cid),
+                "issue":issue})
+        rfc_conflicts, unclassified=classify_objections(question,all_objections)
+        already_addressed, still_open=partition_addressed_objections(unclassified)
+        rfc_conflicts=[{k:v for k,v in row.items() if k!="target_text"}
+                       for row in rfc_conflicts]
         brief.unresolved_objections=list(dict.fromkeys(
             self.coverage+
             [row["id"]+": "+row["issue"]+
@@ -1301,6 +1318,7 @@ class FullCouncilRunner(CouncilRunner):
             "advisory_findings":advisory_findings,
             "audit_advisory_findings":audit_advisories,
             "rfc_conflicting_objections":rfc_conflicts,
+            "already_addressed_objections":already_addressed,
             "topic_consolidation":topic_consolidation,
             "reference_checks":self.reference_checks,
             "judge_source":("local_policy" if local_judge else
