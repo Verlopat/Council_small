@@ -168,6 +168,25 @@ def numbered_sentence_excerpt(answer: str, sentence_ids: list[int]) -> str | Non
     return answer[table[sentence_ids[0]][0]:table[sentence_ids[-1]][1]].strip()
 
 
+def source_sentence_ids(answer: str, source_span: str) -> list[int]:
+    """Locate a quoted span inside an [S#]-labelled source sentence.
+
+    Exact/formatting-equivalent provenance only, never a semantic duplicate
+    or a statement of logical entailment. Ambiguous repeated spans do not
+    establish a unique sentence ID.
+    """
+    if not isinstance(answer,str) or not isinstance(source_span,str):
+        return []
+    tags=list(re.finditer(r"(?<!\S)\[S([1-9][0-9]*)\]\s+",answer))
+    matches=[]
+    for index,tag in enumerate(tags):
+        end=tags[index+1].start() if index+1<len(tags) else len(answer)
+        segment=answer[tag.end():end]
+        if locate_source_span(segment,source_span) is not None:
+            matches.append(int(tag.group(1)))
+    return matches if len(matches)==1 else []
+
+
 def locate_source_span(answer: str, span: str) -> str | None:
     """Find formatting-equivalent text and return original, unmodified bytes.
 
