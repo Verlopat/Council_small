@@ -194,7 +194,8 @@ def normalize_topic_judgment(topic: str, reference: dict, versions: list[dict],
             "best_version_id":best,
             "best_statement":selected["statement"] if best else None,
             "summary":str((candidate or {}).get("summary") or
-                          "No source-aligned consolidation available")[:1200],
+                          (selected["statement"] if best else
+                           "No source-aligned consolidation available"))[:1200],
             "missing":[str(x)[:300] for x in
                        ((candidate or {}).get("missing") or [])][:8],
             "partial_matches":partial,
