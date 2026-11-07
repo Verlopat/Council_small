@@ -35,7 +35,8 @@ from council.workflow import CouncilRunner
 from council.requirements import Requirements
 from council.vrf_sanity import scan_vrf_games
 from council.vrf_audit import (scan_audit_issues, classify_objections,
-                               partition_addressed_objections)
+                               partition_addressed_objections,
+                               deduplicate_objections)
 from council.definition_sources import (classify as definition_kind, consult as consult_definition,
                                         game_step, SECTION_HEADINGS, is_summary, topic_text)
 
@@ -1342,13 +1343,11 @@ class FullCouncilRunner(CouncilRunner):
         # unverified objections or treating pattern matches as proofs.
         def target_text(cid):
             claim=self.ledger.claims.get(cid)
-            if not claim:
-                return ""
-            return claim.statement+"\n"+(claim.source_span or "")
+            return claim.statement if claim else ""
         all_objections=[{"id":o.id,"claim_id":o.claim_id,"source":"reviewer",
                          "topic":topic_of(self.ledger.claims[o.claim_id].statement)
                          if o.claim_id in self.ledger.claims else "",
-                         "target_text":target_text(o.claim_id),
+                         "target_statement":target_text(o.claim_id),
                          "issue":o.issue} for o in self.objections]
         for i,issue in enumerate(issues if audit else [],1):
             match=re.search(r"\bp[0-9]+:(?:c|r)[0-9]+(?::repair)?\b",issue)
@@ -1358,16 +1357,30 @@ class FullCouncilRunner(CouncilRunner):
                 "id":"audit:"+str(i),"source":"auditor",
                 "claim_id":cid,
                 "topic":topic_of(claim.statement) if claim else "",
-                "target_text":target_text(cid),
+                "target_statement":target_text(cid),
                 "issue":issue})
         rfc_conflicts, unclassified=classify_objections(question,all_objections)
         already_addressed, still_open=partition_addressed_objections(unclassified)
-        rfc_conflicts=[{k:v for k,v in row.items() if k!="target_text"}
-                       for row in rfc_conflicts]
+        # Classification precedes text deduplication. Two similar criticisms
+        # against different targets may have different statuses; never merge
+        # away a real objection merely because another was already addressed.
+        rfc_conflicts=deduplicate_objections([
+            {k:v for k,v in row.items()
+             if k not in {"target_text","target_statement"}}
+            for row in rfc_conflicts])
+        already_addressed=deduplicate_objections(already_addressed)
+        still_open=deduplicate_objections(still_open)
+        self.events.record("objection_display_deduplicated",
+            raw_count=len(all_objections),
+            displayed_count=sum(map(len,(rfc_conflicts,already_addressed,still_open))),
+            preserved_in_records=True)
         brief.unresolved_objections=list(dict.fromkeys(
             self.coverage+
             [row["id"]+": "+row["issue"]+
-             (" (not independently resolved)" if row["source"]=="reviewer" else "")
+             (" (not independently resolved)" if row["source"]=="reviewer" else "")+
+             (" [similar objection IDs: "+", ".join(
+                    str(i) for i in row["duplicate_ids"])+"]"
+                 if row.get("duplicate_ids") else "")
              for row in still_open]))
         brief.completion_status=("partial" if proposals else "unresolved")
         brief.limitations=list(dict.fromkeys(brief.limitations+self.warnings))
