@@ -68,6 +68,7 @@ def classify(question: str, statement: str) -> tuple[str, str] | None:
     # literally saying 'game': 'Full uniqueness requires that...'.
     definitional = re.search(
         r"\bgame\b|\bdefinition\b|\bdefines?\b|\brequires?\b|"
+        r"\buses?\b|\bunlike\b|\bdiffers?\b|\bcontrasts?\b|"
         r"\bassumes?\b|\bensures?\b|\bmeans?\b|\bproperty\b|"
         r"\b(?:cannot|must not|infeasible|adversary)\b", text)
     if not definitional:
