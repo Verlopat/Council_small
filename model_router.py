@@ -375,6 +375,18 @@ class Router:
                     raise CandidateError('Invalid Council Groq reasoning setting',
                                          kind='request_invalid')
                 payload['reasoning_effort'] = effort
+            # OpenRouter supports a normalized reasoning-effort setting for
+            # reasoning models, including the published Nemotron 3 Ultra
+            # endpoint. Reduce hidden reasoning spent on Council JSON roles.
+            # Do not assume LLM7 forwards this OpenRouter-specific field.
+            if (provider == 'OpenRouter' and 'nemotron' in model.lower()
+                    and system_text and not probe):
+                effort = os.getenv('COUNCIL_NEMOTRON_REASONING_EFFORT',
+                                   'low').strip().lower()
+                if effort not in {'low','medium','high','minimal','none'}:
+                    raise CandidateError('Invalid Council Nemotron reasoning setting',
+                                         kind='request_invalid')
+                payload['reasoning'] = {'effort': effort}
             if response_format is not None:
                 if provider != 'Groq' or probe or not isinstance(response_format, dict):
                     raise CandidateError('Unsupported response formatting policy',
