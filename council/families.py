@@ -20,7 +20,7 @@ class Family:
 FAMILIES: dict[str, Family] = {
     "gpt-oss": Family("gpt-oss", (Endpoint("Groq", "openai/gpt-oss-120b"),)),
     "command": Family("command", (Endpoint("Cohere", "command-a-plus-05-2026",
-                                               timeout_seconds=90, max_tokens=4000),
+                                               timeout_seconds=90, max_tokens=4500),
                                   Endpoint("Cohere", "command-a-03-2025",
                                            timeout_seconds=90, max_tokens=4000))),
     "nemotron": Family("nemotron", (Endpoint("OpenRouter", "nvidia/nemotron-3-ultra-550b-a55b:free",
