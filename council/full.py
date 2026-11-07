@@ -517,6 +517,11 @@ class FullCouncilRunner(CouncilRunner):
                     "task":"Compare every version to the exact source text; "
                            "choose the best source-aligned description. "
                            "Do not claim formal verification."}, synthesis=True)
+            if candidate is not None:
+                # The caller already knows these context fields. Gemini may
+                # omit them while correctly returning version judgments.
+                candidate.setdefault("topic",topic)
+                candidate["summary"]=candidate.get("summary") or ""
             result=normalize_topic_judgment(topic,excerpt,versions,candidate)
             self.events.record("topic_consolidation",topic=topic,
                 section=section,best_version_id=result["best_version_id"],
