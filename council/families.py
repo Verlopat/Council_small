@@ -22,7 +22,7 @@ FAMILIES: dict[str, Family] = {
     "command": Family("command", (Endpoint("Cohere", "command-a-plus-05-2026",
                                                timeout_seconds=90, max_tokens=4500),
                                   Endpoint("Cohere", "command-a-03-2025",
-                                           timeout_seconds=90, max_tokens=4000))),
+                                           timeout_seconds=90, max_tokens=4500))),
     "nemotron": Family("nemotron", (Endpoint("OpenRouter", "nvidia/nemotron-3-ultra-550b-a55b:free",
                                                timeout_seconds=110, max_tokens=8000),
                                     Endpoint("LLM7.io", "nemotron-3-nano:30b",
