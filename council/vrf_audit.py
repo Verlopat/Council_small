@@ -220,11 +220,11 @@ MALFORMED_PK = re.compile(
     r"\b(?:public\s+key|pk)\b.{0,65}"
     r"\b(?:malform\w*|malicious|arbitrary)\b",re.I)
 FULL_PK_SCOPE = re.compile(
-    r"\b(?:malicious|arbitrary|any\s+(?:possible\s+)?public|"
+    r"\b(?:malicious\w*|arbitrary|any\s+(?:possible\s+)?public|"
     r"adversarially\s+(?:chosen|selected))\b.{0,55}"
     r"\b(?:public\s+key|pk|keys?)\b|"
     r"\b(?:public\s+key|pk|keys?)\b.{0,55}"
-    r"\b(?:malicious|arbitrary|adversarially)\b",re.I)
+    r"\b(?:malicious\w*|arbitrary|adversarially)\b",re.I)
 
 
 def partition_addressed_objections(objections: list[dict]) -> tuple[list[dict],list[dict]]:
