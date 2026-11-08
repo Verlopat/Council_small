@@ -575,6 +575,37 @@ class FullCouncilRunner(CouncilRunner):
             out.append(result)
         return out
 
+    @staticmethod
+    def _cohere_proposal_references(refs: dict[str,dict]) -> dict[str,dict]:
+        """Preserve short verbatim RFC excerpts for Cohere's proposal only.
+
+        Explicitly mark shortened excerpts as partial. Full indexed sections
+        remain available to judges and other families, so concise drafting
+        input cannot be mistaken for complete citation evidence.
+        """
+        limits={"3.1":800,"3.3":800,"3.4":1200}
+        reduced={}
+        for section,limit in limits.items():
+            source=refs.get(section)
+            if not source:
+                continue
+            excerpt=str(source.get("excerpt",""))
+            if not excerpt:
+                continue
+            if len(excerpt)<=limit:
+                reduced[section]=dict(source)
+                continue
+            cut=excerpt.rfind("\n",0,limit)
+            if cut<limit//2:
+                cut=excerpt.rfind(" ",0,limit)
+            if cut<limit//2:
+                cut=limit
+            reduced[section]=dict(source,excerpt=excerpt[:cut].rstrip(),
+                                  truncated=True,
+                                  excerpt_purpose="verbatim drafting context only; "
+                                  "full RFC section remains in local index")
+        return reduced
+
     async def _stop_for_independence(self, question: str, req: Requirements,
                                       proposals: list[dict]) -> dict:
         """Preserve a single useful answer without implying peer independence.
@@ -999,12 +1030,17 @@ class FullCouncilRunner(CouncilRunner):
             sections=sorted(rfc_refs),
             missing_sections=[s for s in ("3.1","3.3","3.4") if s not in rfc_refs])
         proposals=[]
+        compact_command_refs=self._cohere_proposal_references(rfc_refs)
         raw=await asyncio.gather(*[
             self._call(family,"proposal",{
                 "question":question,"requirements":req.as_data(),
                 "independent":True,"source_spans_required":True,
                 "strategy":self.solver_strategies[family],
-                "reference_sections":rfc_refs})
+                "reference_sections":(
+                    compact_command_refs if family=="command" else rfc_refs),
+                "output_limits":(
+                    {"max_claims":5,"max_approach_lines":5,
+                     "be_concise":True} if family=="command" else None)})
             for family in self.solvers])
         for index,(family,body) in enumerate(zip(self.solvers,raw),1):
             if body is None:continue
@@ -1171,7 +1207,11 @@ class FullCouncilRunner(CouncilRunner):
                     "question":question,"requirements":req.as_data(),
                     "strategy":self.solver_strategies[p["family"]],
                     "independent":True,"source_spans_required":True,
-                    "reference_sections":rfc_refs})
+                    "reference_sections":(
+                        compact_command_refs if p["family"]=="command" else rfc_refs),
+                    "output_limits":(
+                        {"max_claims":5,"max_approach_lines":5,
+                         "be_concise":True} if p["family"]=="command" else None)})
                 if sample:
                     p["stability"]=("stable" if sample.get("approach")==p["approach"]
                                     else "unstable")
