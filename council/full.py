@@ -327,7 +327,7 @@ class FullCouncilRunner(CouncilRunner):
                     "not validated by a game definition; separate proof needed")
             else:
                 self.extra_obligations.append(
-                    claim.id+": game-step/source alignment needs RFC review")
+                    claim.id+": game-step definition/source alignment needs RFC review")
             self.events.record("translator_skipped",claim_id=claim.id,
                                reason="definitional_question")
             return
