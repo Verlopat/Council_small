@@ -291,6 +291,16 @@ def main(argv=None) -> int:
         print("\nHypotheses:\n" + "\n".join("- " + x for x in brief["hypotheses"]))
         print("\nUnresolved reviewer objections:\n" + (
             "\n".join("- " + x for x in brief["unresolved_objections"]) or "(none)"))
+        withheld=result.get("objections_withheld_from_revision") or []
+        if withheld:
+            print("\nReviewer objections withheld BEFORE author revision "
+                  "(advisory RFC/source-scope screening):\n"+
+                  "\n".join("- "+str(o.get("id"))+" ["+
+                            ", ".join(str(k) for k in o.get("kinds",[]))+"]"+
+                            (" §"+str(o["rfc_section"])
+                             if o.get("rfc_section") else "")+
+                            " — "+str(o.get("issue") or "")[:350]
+                            for o in withheld))
         already=result.get("already_addressed_objections") or []
         if already:
             print("\nObjections already addressed by their cited claim "
