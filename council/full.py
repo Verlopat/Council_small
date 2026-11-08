@@ -994,21 +994,58 @@ class FullCouncilRunner(CouncilRunner):
                     if changed!=self.ledger.claims[cid].statement:
                         revised=self.ledger.revise(cid,changed)
                         revised.source_span=None  # never inherit the old anchor
+                        revised.anchor_method=None
                         source_span=item.get("source_span")
+                        revised_ids=item.get("sentence_ids")
                         updated_text=p.get("revised_approach","")
-                        if isinstance(source_span,str) and isinstance(updated_text,str):
-                            try:
-                                anchor=validate_anchor(updated_text,changed,source_span,
-                                    assumptions=string_list(item,"assumptions"))
+                        exact_anchor=False
+                        if isinstance(updated_text,str) and updated_text:
+                            # The author should cite [R#] lines, not the old
+                            # [S#] proposal. Provenance is never a proof.
+                            numbered=(numbered_sentence_excerpt(
+                                updated_text,revised_ids,tag="R")
+                                if isinstance(revised_ids,list) else None)
+                            candidates=[]
+                            if isinstance(source_span,str) and source_span.strip():
+                                candidates.append(source_span)
+                            if locate_source_span(updated_text,changed) is not None:
+                                candidates.append(changed)
+                            for candidate_span in dict.fromkeys(candidates):
+                                try:
+                                    anchor=validate_anchor(
+                                        updated_text,changed,candidate_span,
+                                        assumptions=string_list(item,"assumptions"))
+                                except (ValueError,OutputError):
+                                    continue
                                 revised.source_span=anchor.source_span
+                                revised.anchor_method="revised_exact_quote"
                                 revised.assumptions=list(anchor.assumptions)
                                 revised.quantifiers=list(anchor.quantifiers)
-                            except (ValueError,OutputError):
-                                self.warnings.append(cid+": revised claim anchor/quantifier mismatch")
+                                exact_anchor=True
+                                break
+                            if revised.source_span is None and numbered:
+                                revised.source_span=numbered
+                                revised.anchor_method="revised_sentence_ids"
+                                revised.assumptions=string_list(item,"assumptions")
+                            if revised.source_span is None and isinstance(source_span,str):
+                                quoted=locate_source_span(updated_text,source_span)
+                                if quoted is not None:
+                                    revised.source_span=quoted
+                                    revised.anchor_method="revised_quoted_span"
                         if revised.source_span is None:
-                            self.extra_obligations.append(cid+": revised statement needs a new exact source anchor")
-                        self.events.record("claim_revised",claim_id=cid,version=revised.version,
-                                           source_anchor_verified=bool(revised.source_span))
+                            self.warnings.append(cid+": revised claim has no exact "
+                                                 "source or valid [R#] citation")
+                            self.extra_obligations.append(
+                                cid+": revised statement needs a new exact source anchor")
+                        elif not exact_anchor:
+                            self.extra_obligations.append(
+                                cid+": revised quote/sentence provenance located, "
+                                "but quantifier and claim alignment remain unchecked")
+                        self.events.record("claim_revised",
+                            claim_id=cid,version=revised.version,
+                            source_anchor_verified=exact_anchor,
+                            provenance_located=bool(revised.source_span),
+                            anchor_method=revised.anchor_method)
                 for item in item_list(author,"responses"):
                     oid=require_string(item,"objection_id")
                     if oid not in {o.id for o in related}:continue
