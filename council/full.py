@@ -1800,6 +1800,28 @@ class FullCouncilRunner(CouncilRunner):
                 brief.next_actions.append(
                     "Reserved auditor failed during this run ("+
                     reason[:200]+"); check provider health or retry later")
+        # Audit criticisms also require independent RFC/claim quote checks.
+        # The auditor cannot make an invalid game objection "true" by
+        # merely listing it in its JSON. No calls are made without budget.
+        audit_objections=[]
+        for idx,issue in enumerate(issues,1):
+            candidate_ids=re.findall(
+                r"\bp[0-9]+:(?:c|r)[0-9]+(?::repair)?\b",issue)
+            cid=next((key for key in candidate_ids
+                      if key in self.ledger.claims),None)
+            if cid:
+                audit_objections.append(Objection(
+                    "audit:"+str(idx),"audit",cid,
+                    self.auditor_family or "audit",issue,"",""))
+        audit_grounded=(await self._ground_objections(rfc_refs,audit_objections)
+                       if audit_objections else {})
+        self.grounded_objection_verdicts.update(audit_grounded)
+        self.events.record("audit_objections_grounded",
+            submitted=len(audit_objections),
+            grounded=sum(bool(v.get("grounded"))
+                         for v in audit_grounded.values()),
+            unjudged=len(audit_objections)-sum(
+                bool(v.get("grounded")) for v in audit_grounded.values()))
         # Categorize suspicious review/audit claims without throwing away
         # unverified objections or treating pattern matches as proofs.
         def target_text(cid):
