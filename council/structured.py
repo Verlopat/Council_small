@@ -91,6 +91,25 @@ GEMINI_TOPIC_JUDGE_SCHEMA = {
 }
 
 
+GEMINI_OBJECTION_JUDGE_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "items": {"type": "ARRAY", "items": {
+            "type": "OBJECT", "properties": {
+                "id": {"type": "STRING"},
+                "verdict": {"type": "STRING", "enum": [
+                    "valid", "contradicts_reference",
+                    "already_in_claim", "out_of_scope"]},
+                "quote": {"type": "STRING"},
+                "reason": {"type": "STRING"}},
+            "required": ["id", "verdict", "quote"],
+            "propertyOrdering": ["id", "verdict", "quote", "reason"]}},
+    },
+    "required": ["items"],
+    "propertyOrdering": ["items"],
+}
+
+
 def response_format(provider: str, model: str, role: str) -> dict | None:
     if provider == "Cohere":
         # Chat v2: response_format={type:json_object,schema:...}
@@ -111,6 +130,11 @@ def response_format(provider: str, model: str, role: str) -> dict | None:
                 return None
             return {"type": "gemini_response_schema",
                     "schema": GEMINI_TOPIC_JUDGE_SCHEMA}
+        if role == "objection_judge":
+            if os.getenv("COUNCIL_GEMINI_OBJECTION_JUDGE_SCHEMA", "1") == "0":
+                return None
+            return {"type": "gemini_response_schema",
+                    "schema": GEMINI_OBJECTION_JUDGE_SCHEMA}
         return None
     if provider != "Groq" or not model.startswith("openai/gpt-oss-"):
         return None
