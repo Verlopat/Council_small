@@ -1631,8 +1631,10 @@ class FullCouncilRunner(CouncilRunner):
             prior_cause=verdict.get("cause")
             cause=(prior_cause if prior_cause in
                    {"judge_error","deadline","quota_contention",
-                    "judge_input_too_large"}
-                   else "composition_failure")
+                    "judge_input_too_large"} else
+                   "definition_reference_only"
+                   if is_vrf_definition_question(question) else
+                   "composition_failure")
             verdict=enforce_verdict(dict(verdict,status="unresolved",
                 cause=cause),self.ledger)
             if cause!="composition_failure":
