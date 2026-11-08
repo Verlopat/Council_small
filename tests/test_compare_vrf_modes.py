@@ -1,11 +1,13 @@
 """Offline test: five-run VRF mode comparison does not invent correctness."""
 import csv
 import json
+import sqlite3
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from eval.compare_vrf_modes import GAMES, ensure_scores, load_runs
+from eval.compare_vrf_modes import (
+    GAMES, ensure_scores, load_runs, recorded_provider_attempts)
 
 
 class VRFModeComparisonTests(unittest.TestCase):
@@ -43,6 +45,28 @@ class VRFModeComparisonTests(unittest.TestCase):
                 writer.writerows(records)
             self.assertEqual(ensure_scores(score_path,runs),
                              {("quick",1,"full_uniqueness"):1.0})
+
+    def test_api_attempt_counts_include_recorded_retries_and_failures(self):
+        with TemporaryDirectory() as tmp:
+            folder=Path(tmp)
+            run_id="abcdef0123456789"
+            with sqlite3.connect(folder/(run_id+".sqlite3")) as conn:
+                conn.execute("CREATE TABLE events (event_type TEXT)")
+                conn.executemany("INSERT INTO events(event_type) VALUES (?)",[
+                    ("model_call_started",),("model_call_retry",),
+                    ("model_call_started",),("model_call_failed",)])
+            (folder/"full_1.json").write_text(json.dumps({
+                "run_id":run_id,
+                "research_result":{"completion_status":"partial"},
+                "actual_models":[{"role":"proposal"}],
+                "proposals":[{"id":"p1"}]}))
+            self.assertEqual(recorded_provider_attempts(folder,run_id),3)
+            self.assertIsNone(recorded_provider_attempts(folder,"../etc/passwd"))
+            self.assertIsNone(recorded_provider_attempts(folder,"missing_run"))
+            rows=load_runs(folder,1)
+            full=next(row for row in rows if row["mode"]=="full")
+            self.assertEqual(full["calls"],1)
+            self.assertEqual(full["attempts"],3)
 
     def test_invalid_annotation_grade_does_not_count(self):
         with TemporaryDirectory() as tmp:
