@@ -130,6 +130,31 @@ class GroundedObjectionTests(unittest.TestCase):
         self.assertEqual(p["claim_sentence_ids"]["p2:c3"],[3])
         self.assertEqual(fake._definition_context_by_claim["p2:c3"][1],"3.4")
 
+    def test_unlabelled_sentence_inherits_wrong_game_scope(self):
+        # S2 says nothing about "full uniqueness", but its context is S1.
+        approach=("[S1] Full uniqueness security game: adversary chooses PK. "
+                  "[S2] The adversary outputs two different valid proofs. "
+                  "[S3] Trusted uniqueness gives both honestly generated keys.")
+        ledger=ClaimLedger()
+        ledger.add_claim(Claim("p2:c2",1,
+            "Trusted uniqueness requires honest keys given to the adversary.",
+            "command"))
+        events=[]
+        fake=SimpleNamespace(
+            ledger=ledger,_definition_context_by_claim={},
+            warnings=[],extra_obligations=[],
+            events=SimpleNamespace(record=lambda name,**kwargs:
+                                   events.append((name,kwargs))))
+        p={"approach":approach,"claim_ids":["p2:c2"],"id":"p2"}
+        raw={"claims":[{"id":"c2",
+                        "statement":ledger.claims["p2:c2"].statement,
+                        "source_span":"The adversary outputs two different valid proofs.",
+                        "sentence_ids":[2],"assumptions":[]}]}
+        FullCouncilRunner._anchors(fake,p,raw)
+        self.assertEqual(p["claim_sentence_ids"]["p2:c2"],[])
+        self.assertIsNone(fake.ledger.claims["p2:c2"].source_span)
+        self.assertTrue(any(name=="anchor_topic_mismatch" for name,_ in events))
+
     def test_pure_definition_question_skips_translator_even_for_repairs(self):
         self.assertTrue(is_vrf_definition_question(Q))
         self.assertFalse(is_vrf_definition_question(
