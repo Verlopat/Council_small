@@ -92,6 +92,8 @@ class RevisedClaim(ModelSchema):
     claim_id:str=Field(min_length=1)
     statement:str=Field(min_length=1)
     source_span:str|None=None
+    # [R#] numbers locate revised source text; they are NOT evidence.
+    sentence_ids:list[int]=Field(default_factory=list)
     assumptions:list[str]=Field(default_factory=list)
 
 class Revision(ModelSchema):
