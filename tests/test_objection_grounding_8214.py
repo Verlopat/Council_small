@@ -227,8 +227,9 @@ class GroundedObjectionTests(unittest.TestCase):
         self.assertEqual(queries,[("gemini","objection_judge")])
         self.assertEqual(decisions["o1"]["verdict"],"contradicts_reference")
         self.assertEqual(decisions["o2"]["verdict"],"already_in_claim")
-        self.assertEqual(decisions["o3"]["verdict"],"valid")
-        self.assertEqual(decisions["o4"]["verdict"],"valid")
+        # Invalid model quotations are unjudged, NEVER promoted to valid.
+        self.assertEqual(decisions["o3"]["verdict"],"unjudged")
+        self.assertEqual(decisions["o4"]["verdict"],"unjudged")
         self.assertFalse(decisions["o3"]["grounded"])
 
 
