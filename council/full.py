@@ -140,19 +140,28 @@ class FullCouncilRunner(CouncilRunner):
             # the actual cited segment *before* trusting its provenance.
             wanted=topic_of(claim.statement)
             cited=numbered_sentence_excerpt(p["approach"],ids) if ids else None
+            cited_sections={section_by_sentence[i] for i in ids
+                            if section_by_sentence.get(i)}
             if (cited and wanted in group_section and
-                    topic_of(cited) in group_section and
-                    topic_of(cited)!=wanted):
+                    (cited_sections and cited_sections!={group_section[wanted]}
+                     or topic_of(cited) in group_section
+                     and topic_of(cited)!=wanted)):
                 self.events.record("anchor_topic_mismatch",
                     claim_id=cid,cited_ids=ids,
-                    cited_topic=topic_of(cited),claim_topic=wanted)
+                    cited_topic=topic_of(cited),
+                    inherited_sections=sorted(cited_sections),
+                    claim_topic=wanted)
                 ids=[]
             if not ids and isinstance(raw.get("source_span"),str):
                 possible=source_sentence_ids(p["approach"],raw["source_span"])
                 excerpt=numbered_sentence_excerpt(p["approach"],possible)
+                recovered_sections={section_by_sentence[i] for i in possible
+                                    if section_by_sentence.get(i)}
                 if (possible and excerpt and
                         (wanted not in group_section or
-                         topic_of(excerpt) in {wanted,"5_other"})):
+                         (not recovered_sections or
+                          recovered_sections=={group_section[wanted]})
+                         and topic_of(excerpt) in {wanted,"5_other"})):
                     ids=possible
             p["claim_sentence_ids"][cid]=ids
             scopes={section_by_sentence[i] for i in ids
@@ -185,6 +194,19 @@ class FullCouncilRunner(CouncilRunner):
                         and claim.statement not in candidates):
                     candidates.append(claim.statement)
                 for candidate in candidates:
+                    # Even a verbatim quote of an unlabeled sentence can be
+                    # from a different game. [S#] inherits the last named
+                    # topic in the author's approach (e.g. S3 after S1).
+                    if source_name=="approach" and wanted in group_section:
+                        quote_ids=source_sentence_ids(p["approach"],candidate)
+                        quote_sections={section_by_sentence[i] for i in quote_ids
+                                        if section_by_sentence.get(i)}
+                        if (quote_sections and
+                                quote_sections!={group_section[wanted]}):
+                            self.events.record("anchor_quote_topic_mismatch",
+                                claim_id=cid,claim_topic=wanted,
+                                quoted_sections=sorted(quote_sections))
+                            continue
                     try:
                         anchored=validate_anchor(
                             source_text,claim.statement,candidate,
