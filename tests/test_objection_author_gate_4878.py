@@ -2,6 +2,7 @@
 
 These are offline orchestration invariants; quote matching is not proof.
 """
+import asyncio
 import contextlib
 from io import StringIO
 from pathlib import Path
@@ -124,6 +125,33 @@ class ProtectedAuthorReviewTests(unittest.TestCase):
         ids=[x["id"] for values in buckets.values() for x in values]
         self.assertEqual(len(ids),len(set(ids)))
         self.assertEqual(set(ids),{x["id"] for x in raw})
+
+    def test_mislabeled_before_challenge_gap_becomes_already_in_claim(self):
+        claim_text=("Full pseudorandomness game: the target alpha* is not "
+                    "previously queried, and the adversary must not query "
+                    "alpha* after the challenge.")
+        ledger=ClaimLedger()
+        ledger.add_claim(Claim("p3:c3",1,claim_text,"nemotron"))
+        issue=("The claim only forbids querying alpha* after the challenge, "
+               "not before it, so a prior evaluation query would reveal beta.")
+        source=("In full pseudorandomness, the target input is never "
+                "previously queried and post-challenge target queries "
+                "are prohibited.")
+        async def judge(*args,**kwargs):
+            return {"items":[{"id":"o9","verdict":"contradicts_reference",
+                              "quote":"post-challenge target queries are prohibited",
+                              "reason":"Missing pre-challenge freshness"}]}
+        fake=SimpleNamespace(
+            ledger=ledger,judge_family="gemini",
+            budget=SimpleNamespace(debate_remaining=lambda:100),
+            events=SimpleNamespace(record=lambda *args,**kwargs:None),
+            _call=judge)
+        decision=asyncio.run(FullCouncilRunner._ground_objections(
+            fake,{"3.4":{"excerpt":source,"truncated":False}},
+            [ob("o9",claim="p3:c3",issue=issue)]))
+        self.assertEqual(decision["o9"]["verdict"],"already_in_claim")
+        self.assertTrue(decision["o9"]["grounded"])
+        self.assertIn("not previously queried",decision["o9"]["quote"])
 
     def test_one_sentence_command_outline_retries(self):
         task=("[S1] Define full uniqueness, trusted uniqueness, and "
