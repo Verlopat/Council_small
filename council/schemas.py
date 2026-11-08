@@ -171,6 +171,17 @@ class TopicJudge(ModelSchema):
     summary:str|None=None
 
 
+class ObjectionJudgment(ModelSchema):
+    id:str=Field(min_length=1)
+    verdict:Literal["valid","contradicts_reference","already_in_claim","out_of_scope"]
+    quote:str=""
+    reason:str=""
+
+
+class ObjectionJudge(ModelSchema):
+    items:list[ObjectionJudgment]=Field(default_factory=list)
+
+
 class Synthesis(ModelSchema):
     proposed_approach:str=Field(min_length=1)
     supported_findings:list[str]=Field(default_factory=list)
@@ -200,7 +211,7 @@ class Repair(ModelSchema):
 
 SCHEMAS={
     "proposal":Proposal, "review":Review, "revision":Revision,
-    "topic_judge":TopicJudge,
+    "topic_judge":TopicJudge, "objection_judge":ObjectionJudge,
     "translate":Translation, "hunter":Hunter, "judge":Judge,
     "synthesis":Synthesis, "audit":Audit,
     "coverage":Coverage,"relevance":Relevance,"repair":Repair,
