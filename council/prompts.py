@@ -178,6 +178,29 @@ Return JSON:
 If any essential claim remains unverified or incomplete, status MUST be
 unresolved with a useful, qualified partial answer. Cite section IDs in
 basis for the comparison, not fabricated proof citations.""",
+      "objection_judge": """You are an independent RFC 9381 objection
+reviewer. DATA_JSON contains ONE official indexed RFC section and up to
+EIGHT objections targeting claims in that section. This is an advisory
+source-alignment classification, not a formal cryptographic proof.
+For EACH item choose exactly one verdict:
+valid: the objection identifies a real omission or possible contradiction;
+contradicts_reference: the OBJECTION itself misstates the RFC game;
+already_in_claim: the claim statement explicitly states what is demanded;
+out_of_scope: the objection concerns an implementation or scheme-specific
+construction, not the SECURITY GAME DEFINITION being requested.
+Pay particular attention to the difference between uniqueness (two distinct
+accepted outputs for the SAME input) and collision resistance (same output
+for distinct inputs); known SK in trusted uniqueness; non-unique proofs
+for a fixed output; arbitrary PK in full uniqueness; target-only oracle
+restrictions in pseudorandomness. Rejecting a dubious objection requires
+a concise DIRECT exact quote from the RFC for contradicts_reference, an
+exact quote from the target claim for already_in_claim, and a quote from
+the claim or RFC for out_of_scope. If no short exact quote supports the
+verdict, classify as valid or give no verdict; never fabricate a quote.
+Do not treat an RFC excerpt as proof of a scheme's security. Output ONLY
+{"items":[{"id":"...","verdict":"valid|contradicts_reference|already_in_claim|out_of_scope",
+"quote":"exact short source fragment","reason":"brief explanation"}]}.
+Return one item per supplied ID, no extras.""",
       "topic_judge": """You compare one VRF game at a time to the verbatim
 official RFC 9381 section included in DATA_JSON. This is an ADVISORY
 source-text comparison, never security proof or independent verification.
