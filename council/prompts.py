@@ -92,6 +92,13 @@ When DATA_JSON contains reference_sections from the authenticated RFC 9381
 index, compare each objection against the supplied section text BEFORE
 accepting it. Reject an objection contradicting the official reference and
 quote the SHORT verbatim reference sentence/phrase when rejecting it.
+Only change a claim if a grounded VALID objection identifies a specific
+reference requirement the cited claim actually contradicts or omits.
+If the objection does not identify such a gap, leave the claim unchanged.
+Do not add restrictions that are absent from the RFC simply to appease a critic.
+In full uniqueness, the adversary chooses PK and may know a matching SK;
+DO NOT add "cannot use SK", "not given SK" or "no evaluation oracle"
+as artificial restrictions on that adversary.
 In particular: uniqueness fixes one input and challenges two DIFFERENT valid
 outputs; two inputs with the SAME output is collision resistance, not
 uniqueness. Trusted uniqueness allows the honestly generated SK to be known.
@@ -182,6 +189,15 @@ basis for the comparison, not fabricated proof citations.""",
 reviewer. DATA_JSON contains ONE official indexed RFC section and up to
 EIGHT objections targeting claims in that section. This is an advisory
 source-alignment classification, not a formal cryptographic proof.
+CHECK THE EXACT CITED CLAIM FIRST, before interpreting the RFC:
+if the claimed "missing" requirement is already explicitly present, answer
+already_in_claim and quote the exact claim words. Do not turn a correct
+"no target queries after the challenge" rule into a ban on all subsequent
+queries; likewise distinguish the target never being queried BEFORE the
+challenge from an absence of proof at the challenge.
+Full uniqueness allows adversarially chosen PK, and therefore the adversary
+can know a corresponding SK; DO NOT require that the adversary lacks SK
+or is denied an evaluation oracle.
 For EACH item choose exactly one verdict:
 valid: the objection identifies a real omission or possible contradiction;
 contradicts_reference: the OBJECTION itself misstates the RFC game;
@@ -195,8 +211,11 @@ for a fixed output; arbitrary PK in full uniqueness; target-only oracle
 restrictions in pseudorandomness. Rejecting a dubious objection requires
 a concise DIRECT exact quote from the RFC for contradicts_reference, an
 exact quote from the target claim for already_in_claim, and a quote from
-the claim or RFC for out_of_scope. If no short exact quote supports the
-verdict, classify as valid or give no verdict; never fabricate a quote.
+the claim or RFC for out_of_scope. For valid, quote the EXACT reference requirement that the target claim
+is missing or contradicting. A vague source phrase is not evidence that
+a complaint is valid. If no short exact quote supports any verdict,
+omit that item and let the coordinator mark it UNJUDGED; NEVER guess
+"valid" merely to fill the output. Never fabricate a quote.
 Do not treat an RFC excerpt as proof of a scheme's security. Output ONLY
 {"items":[{"id":"...","verdict":"valid|contradicts_reference|already_in_claim|out_of_scope",
 "quote":"exact short source fragment","reason":"brief explanation"}]}.
