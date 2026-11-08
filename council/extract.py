@@ -144,17 +144,20 @@ def _locate_chars(source: str) -> tuple[str, list[tuple[int, int]]]:
     return "".join(packed), packed_offsets
 
 
-def numbered_sentence_excerpt(answer: str, sentence_ids: list[int]) -> str | None:
+def numbered_sentence_excerpt(answer: str, sentence_ids: list[int],
+                              *, tag: str = "S") -> str | None:
     """Find exact original text from sequential [S1] labels.
 
     Provenance only. This does not establish semantic alignment.
     """
+    if tag not in {"S","R"}:
+        return None
     if (not sentence_ids or len(sentence_ids) > 8 or
         any(type(i) is not int or i < 1 or i > 100 for i in sentence_ids) or
         sentence_ids != list(range(sentence_ids[0], sentence_ids[-1]+1))):
         return None
     # Sequential tags may share a physical line.
-    pattern = r"(?<!\S)\[S([1-9][0-9]*)\]\s+"
+    pattern = rf"(?<!\S)\[{tag}([1-9][0-9]*)\]\s+"
     tags = list(re.finditer(pattern, answer))
     table = {}
     for position, tag in enumerate(tags):
@@ -168,16 +171,17 @@ def numbered_sentence_excerpt(answer: str, sentence_ids: list[int]) -> str | Non
     return answer[table[sentence_ids[0]][0]:table[sentence_ids[-1]][1]].strip()
 
 
-def source_sentence_ids(answer: str, source_span: str) -> list[int]:
+def source_sentence_ids(answer: str, source_span: str,
+                        *, tag: str = "S") -> list[int]:
     """Locate a quoted span inside an [S#]-labelled source sentence.
 
     Exact/formatting-equivalent provenance only, never a semantic duplicate
     or a statement of logical entailment. Ambiguous repeated spans do not
     establish a unique sentence ID.
     """
-    if not isinstance(answer,str) or not isinstance(source_span,str):
+    if tag not in {"S","R"} or not isinstance(answer,str) or not isinstance(source_span,str):
         return []
-    tags=list(re.finditer(r"(?<!\S)\[S([1-9][0-9]*)\]\s+",answer))
+    tags=list(re.finditer(rf"(?<!\S)\[{tag}([1-9][0-9]*)\]\s+",answer))
     matches=[]
     for index,tag in enumerate(tags):
         end=tags[index+1].start() if index+1<len(tags) else len(answer)
