@@ -20,7 +20,7 @@ from council.evidence import EvidenceRejected
 from council.extract import (validate_anchor, locate_source_span, numbered_sentence_excerpt,
                              source_sentence_ids, suggest_duplicate_claims)
 from council.judge import (blind_ledger, enforce_verdict, judge_failure,
-                           topic_of, TOPIC_SECTIONS, normalize_topic_judgment)
+                           topic_of, TOPIC_SECTIONS, normalize_topic_judgment, _flat)
 from council.claim_filter import is_meta_claim, close_to_owner
 from council.ledger import SQLiteLedger
 from council.models import Claim, ClaimStatus, Evidence, EvidenceKind, ResearchResult, Objection, AuthorResponse
@@ -101,6 +101,7 @@ class FullCouncilRunner(CouncilRunner):
         self._definition_context_by_claim={}
         self._translator_unavailable=False
         self.objections=[]
+        self.grounded_objection_verdicts={}
         self.author_responses=[]
 
     def _anchors(self,p:dict,body:dict)->None:
@@ -815,6 +816,77 @@ class FullCouncilRunner(CouncilRunner):
                 sections.add(section)
         return {key:refs[key] for key in sorted(sections)}
 
+    async def _ground_objections(self, rfc_refs: dict[str,dict],
+                                 objections: list[Objection]) -> dict[str,dict]:
+        """Up to three optional, quote-checked RFC objection judgments.
+
+        Criticisms with an unavailable model, omitted ID, invalid quote, or
+        suspicious verdict remain valid/eligible. This compares text; it
+        does not prove that a source entails a mathematical statement.
+        """
+        mapping={"1_full_uniqueness":"3.1","2_trusted_uniqueness":"3.3",
+                 "3_pseudorandomness":"3.4"}
+        by_section={}
+        for obj in objections:
+            claim=self.ledger.claims.get(obj.claim_id)
+            if claim is None:
+                continue
+            section=mapping.get(topic_of(claim.statement))
+            if section in rfc_refs:
+                by_section.setdefault(section,[]).append((obj,claim))
+        outcomes={}
+        for section in ("3.1","3.3","3.4"):
+            candidates=by_section.get(section,[])[:8]
+            if (not candidates or
+                    not self.judge_family or
+                    self.budget.debate_remaining()<=8):
+                continue
+            ref=rfc_refs[section]
+            if ref.get("truncated") or not ref.get("excerpt"):
+                continue
+            response=await self._call(self.judge_family,"objection_judge",{
+                "reference":ref,"section":section,
+                "items":[{"id":o.id,"claim":c.statement[:850],
+                          "objection":o.issue[:850]} for o,c in candidates],
+                "task":"Classify each objection against the exact cited claim "
+                       "and indexed RFC section; never assume an unsupported "
+                       "dismissal is established."},synthesis=True)
+            known={o.id:c for o,c in candidates}
+            source=_flat(ref["excerpt"])
+            if not isinstance(response,dict):
+                continue
+            for row in response.get("items",[]) or []:
+                oid=row.get("id")
+                if oid not in known or oid in outcomes:
+                    continue
+                verdict=row.get("verdict")
+                quote=row.get("quote") or ""
+                if not isinstance(quote,str):
+                    quote=""
+                normalized=_flat(quote)
+                claim_text=_flat(known[oid].statement)
+                in_reference=bool(normalized and normalized in source)
+                in_claim=bool(normalized and normalized in claim_text)
+                # Quoting the claim itself is NOT independent evidence that
+                # an objection contradicts the RFC; require an RFC quote.
+                allowed=(
+                    verdict=="contradicts_reference" and in_reference or
+                    verdict=="already_in_claim" and in_claim or
+                    verdict=="out_of_scope" and (in_reference or in_claim))
+                if not allowed:
+                    verdict="valid"
+                outcomes[oid]={"verdict":verdict,"section":section,
+                               "quote":quote if allowed else "",
+                               "grounded":bool(allowed),
+                               "reason":str(row.get("reason") or "")[:350]}
+            self.events.record("objection_judge_batch",
+                section=section,submitted=len(candidates),
+                returned=sum(o.id in outcomes for o,c in candidates),
+                dismissed=sum(o.id in outcomes and
+                              outcomes[o.id]["grounded"]
+                              for o,c in candidates))
+        return outcomes
+
     def _triage_revision_objections(self, question: str,
                                     rfc_refs: dict[str,dict]) -> tuple[list[dict],list[Objection]]:
         """Gate unsafe objections BEFORE revision or moderator exposure.
@@ -1178,6 +1250,24 @@ class FullCouncilRunner(CouncilRunner):
         # moderator until their RFC-game meaning has been screened.
         withheld,revision_objections=self._triage_revision_objections(
             question,rfc_refs)
+        # Grounded model comparisons are a second, quote-checked advisory
+        # gate. The raw objections remain in self.objections for audit.
+        self.grounded_objection_verdicts=await self._ground_objections(
+            rfc_refs,revision_objections)
+        screened=[]
+        for o in revision_objections:
+            verdict=self.grounded_objection_verdicts.get(o.id,{})
+            if verdict.get("grounded") and verdict.get("verdict") in {
+                    "contradicts_reference","already_in_claim","out_of_scope"}:
+                withheld.append({
+                    "id":o.id,"claim_id":o.claim_id,
+                    "kinds":["grounded_"+verdict["verdict"]],
+                    "rfc_section":verdict["section"],"issue":o.issue,
+                    "quote":verdict["quote"],"reason":verdict["verdict"],
+                    "reference_complete":True})
+            else:
+                screened.append(o)
+        revision_objections=screened
         for o in revision_objections:
             try:
                 self.moderator.submit(Message("review:"+o.id,o.claim_id,
