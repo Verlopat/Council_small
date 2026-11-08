@@ -842,9 +842,9 @@ class FullCouncilRunner(CouncilRunner):
                                  objections: list[Objection]) -> dict[str,dict]:
         """Up to three optional, quote-checked RFC objection judgments.
 
-        Criticisms with an unavailable model, omitted ID, invalid quote, or
-        suspicious verdict remain valid/eligible. This compares text; it
-        does not prove that a source entails a mathematical statement.
+        An unavailable, omitted, or ungrounded model result is UNJUDGED,
+        never automatically 'valid'. This is source-text advisory review,
+        not mathematical verification.
         """
         mapping={"1_full_uniqueness":"3.1","2_trusted_uniqueness":"3.3",
                  "3_pseudorandomness":"3.4"}
@@ -891,13 +891,17 @@ class FullCouncilRunner(CouncilRunner):
                 in_claim=bool(normalized and normalized in claim_text)
                 # Quoting the claim itself is NOT independent evidence that
                 # an objection contradicts the RFC; require an RFC quote.
-                allowed=(
-                    verdict=="valid" and (in_reference or in_claim) or
+                # A valid objection requires an RFC quote; merely
+                # parroting the attacked claim cannot establish validity.
+                # Short generic substrings are not adequate grounding.
+                enough=len(normalized)>=12
+                allowed=enough and (
+                    verdict=="valid" and in_reference or
                     verdict=="contradicts_reference" and in_reference or
                     verdict=="already_in_claim" and in_claim or
                     verdict=="out_of_scope" and (in_reference or in_claim))
                 if not allowed:
-                    verdict="valid"
+                    verdict="unjudged"
                 outcomes[oid]={"verdict":verdict,"section":section,
                                "quote":quote if allowed else "",
                                "grounded":bool(allowed),
@@ -909,6 +913,10 @@ class FullCouncilRunner(CouncilRunner):
                     o.id in outcomes and outcomes[o.id]["grounded"]
                     and outcomes[o.id]["verdict"] in {
                         "contradicts_reference","already_in_claim","out_of_scope"}
+                    for o,c in candidates),
+                unjudged=sum(
+                    o.id not in outcomes or
+                    outcomes[o.id]["verdict"]=="unjudged"
                     for o,c in candidates))
         return outcomes
 
