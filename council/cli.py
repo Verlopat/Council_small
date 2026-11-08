@@ -229,6 +229,11 @@ def main(argv=None) -> int:
         brief = result["research_result"]
         print("\nRun: " + run_id + " | status: " + brief["completion_status"])
         topics=result.get("topic_consolidation") or []
+        single_proposal=bool((result.get("role_coverage") or {}).get(
+            "single_proposal_assessed"))
+        if single_proposal:
+            print("Single-proposal mode: RFC topic comparisons are advisory; "
+                  "no independent solver cross-review was possible.")
         if topics:
             print("\nBest answer per game (RFC 9381 alignment; advisory, NOT verified):")
             for row in topics:
@@ -246,6 +251,15 @@ def main(argv=None) -> int:
                               str(row.get("summary") or "")[:550])
                     else:
                         print("  Reference or topic-judge comparison unavailable/incomplete.")
+                    if single_proposal:
+                        versions=row.get("versions") or []
+                        if versions:
+                            print("  Single-proposal candidate(s), not independently "
+                                  "validated:")
+                            for version in versions[:3]:
+                                print("   - "+str(version.get("id"))+" ["+
+                                      str(version.get("status") or "unjudged")+"] "+
+                                      str(version.get("statement") or "")[:950])
                     for partial in (row.get("partial_matches") or [])[:6]:
                         bits=[]
                         agrees=partial.get("agrees") or []
