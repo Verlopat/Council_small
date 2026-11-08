@@ -17,7 +17,7 @@ class DummyRouter:
         return [candidate]
 
     def generate(self, candidate, message, *, probe=False, request_timeout=None,
-                 max_output_tokens=None):
+                 max_output_tokens=None, **kwargs):
         self.calls.append((candidate.provider, candidate.model, message))
         if candidate.provider == "Z.ai":
             raise CandidateError("simulated server failure", kind="server")
@@ -64,7 +64,7 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
                 t.router = fake
                 await t.complete("gpt-oss", "Prompt", RunBudget.start(30, 4),
                                  role="proposal")
-                self.assertEqual(observed, [1800])
+                self.assertEqual(observed, [2800])
 
 if __name__ == "__main__":
     unittest.main()
