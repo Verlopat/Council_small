@@ -35,7 +35,7 @@ from council.workflow import CouncilRunner
 from council.requirements import Requirements
 from council.vrf_sanity import scan_vrf_games, unsupported_full_sk_secrecy
 from council.vrf_audit import (scan_audit_issues, objection_conflicts,
-                               objection_scope_noise)
+                               objection_scope_noise, partition_addressed_objections)
 from council.objection_sections import presentation_sections
 from council.definition_sources import (classify as definition_kind, consult as consult_definition,
                                         game_step, is_vrf_definition_question,
@@ -873,7 +873,7 @@ class FullCouncilRunner(CouncilRunner):
                 "task":"Classify each objection against the exact cited claim "
                        "and indexed RFC section; never assume an unsupported "
                        "dismissal is established."},synthesis=True)
-            known={o.id:c for o,c in candidates}
+            known={o.id:(o,c) for o,c in candidates}
             source=_flat(ref["excerpt"])
             if not isinstance(response,dict):
                 continue
@@ -886,7 +886,8 @@ class FullCouncilRunner(CouncilRunner):
                 if not isinstance(quote,str):
                     quote=""
                 normalized=_flat(quote)
-                claim_text=_flat(known[oid].statement)
+                objection,target_claim=known[oid]
+                claim_text=_flat(target_claim.statement)
                 in_reference=bool(normalized and normalized in source)
                 in_claim=bool(normalized and normalized in claim_text)
                 # Quoting the claim itself is NOT independent evidence that
@@ -900,6 +901,21 @@ class FullCouncilRunner(CouncilRunner):
                     verdict=="contradicts_reference" and in_reference or
                     verdict=="already_in_claim" and in_claim or
                     verdict=="out_of_scope" and (in_reference or in_claim))
+                # A source-grounded "contradicts_reference" can itself
+                # mislabel a complaint about a feature ALREADY explicitly in
+                # the target statement. For narrow, detectable cases (such
+                # as "never queried before or after") prefer a claim quote.
+                # This never upgrades an ungrounded judgment into certainty.
+                if allowed and verdict=="contradicts_reference":
+                    addressed,_=partition_addressed_objections([{
+                        "id":oid,"issue":objection.issue,
+                        "topic":topic_of(target_claim.statement),
+                        "target_statement":target_claim.statement}])
+                    if addressed:
+                        verdict="already_in_claim"
+                        # The whole quoted claim is verbatim provenance,
+                        # not an assertion of formal entailment.
+                        quote=target_claim.statement[:850]
                 if not allowed:
                     verdict="unjudged"
                 outcomes[oid]={"verdict":verdict,"section":section,
