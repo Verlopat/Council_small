@@ -316,13 +316,19 @@ PRE_CHALLENGE = re.compile(
     r"\bfresh\s+(?:challenge\s+)?input\b|"
     r"\b(?:not|never)\s+queried\s+before\b", re.I)
 POST_CHALLENGE = re.compile(
-    r"\b(?:forbid\w*|may\s+not|cannot|must\s+not|"
+    r"\b(?:forbid\w*|may\s+not|cannot|must\s+not|never|"
     r"not\s+allow\w*|disallow\w*|prohibit\w*)\b"
     r".{0,90}\b(?:quer\w*|ask\w*|eval(?:uate|uation)?)\b"
-    r".{0,100}(?:x\s*\*|challenge\s+input)|"
-    r"\b(?:x\s*\*|challenge\s+input)\b.{0,80}"
-    r"\b(?:cannot|must\s+not|forbid\w*|disallow\w*)\b"
-    r".{0,50}\bquer\w*\b",re.I)
+    r".{0,105}(?:x\s*\*|alpha\s*\*|α\s*\*|"
+    r"target\s+(?:input|alpha)|challenge\s+input)|"
+    r"\b(?:x\s*\*|alpha\s*\*|α\s*\*|"
+    r"target\s+(?:input|alpha)|challenge\s+input)\b"
+    r".{0,80}\b(?:cannot|must\s+not|never|forbid\w*|disallow\w*)\b"
+    r".{0,50}\bquer\w*\b|"
+    r"\b(?:must\s+not|cannot|never)\b.{0,30}\bquer\w*\b"
+    r".{0,25}(?:alpha\s*\*|α\s*\*|x\s*\*)"
+    r".{0,65}\b(?:after|post.challenge)\b",re.I)
+
 SK_DISCLOSED = re.compile(
     # A positive grant is required. "given only pk (never sk)" must NOT match.
     r"\b(?:(?<!not\s)(?<!never\s)(?<!without\s)gives?\s+both\s+pk\s+and\s+sk|"
