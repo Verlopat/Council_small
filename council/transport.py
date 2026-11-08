@@ -103,6 +103,20 @@ class FamilyTransport:
                 output_tokens = role_tokens.get(role, 1800)
             if entry.max_tokens is not None:
                 output_tokens = max(output_tokens, entry.max_tokens)
+            # Cohere's long strict-schema proposals repeatedly truncated
+            # despite 6000 tokens. With compact source inputs and at most 5
+            # claims, default to a smaller output cap. Other Cohere roles
+            # retain the higher 6000-token endpoint limit.
+            if entry.provider=="Cohere" and role=="proposal":
+                try:
+                    cap=int(os.getenv("COUNCIL_COHERE_PROPOSAL_MAX_TOKENS","3500"))
+                except ValueError:
+                    raise ValueError(
+                        "COUNCIL_COHERE_PROPOSAL_MAX_TOKENS must be an integer") from None
+                if not 2000<=cap<=6000:
+                    raise ValueError(
+                        "COUNCIL_COHERE_PROPOSAL_MAX_TOKENS must be 2000..6000")
+                output_tokens=min(output_tokens,cap)
             estimated_tokens=max(1,len(message)//3)+output_tokens
             retry_after = None
             http_status = None
