@@ -26,7 +26,7 @@ class ProcessTransportTests(unittest.IsolatedAsyncioTestCase):
                            RunBudget.start(12,0),role="proposal",synthesis=True)
             self.assertEqual(result.text,"42")
             process.assert_called_once()
-            self.assertEqual(process.call_args.kwargs["max_tokens"],1800)
+            self.assertEqual(process.call_args.kwargs["max_tokens"],2800)
     async def test_hard_request_rejects_invalid_timeout(self):
         with self.assertRaises(ValueError):
             generate("Groq","model","question",system_text=None,timeout=0)
