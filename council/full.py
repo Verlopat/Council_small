@@ -1360,14 +1360,17 @@ class FullCouncilRunner(CouncilRunner):
                         {"max_claims":5,"max_approach_lines":5,
                          "be_concise":True} if p["family"]=="command" else None)})
                 if sample:
-                    p["stability"]=("stable" if sample.get("approach")==p["approach"]
-                                    else "unstable")
-                    for cid in p["claim_ids"]:
-                        self.ledger.claims[cid].needs_re_evaluation = (
-                            p["stability"]=="unstable" and
-                            self.ledger.claims[cid].status is not ClaimStatus.SUPPORTED)
+                    # Exact prose equality is NOT a semantic stability test.
+                    # Different generations should not automatically invalidate
+                    # verified evidence, nor does identical prose prove a claim.
+                    p["stability"]=(
+                        "text_identical_unverified"
+                        if sample.get("approach")==p["approach"]
+                        else "semantic_stability_unassessed")
                     self.events.record("adaptive_sample",proposal_id=p["id"],
-                                       stability=p["stability"])
+                        stability=p["stability"],
+                        semantic_equivalence="not_checked",
+                        evidence_invalidation="none_from_wording_alone")
         elif self.verified:
             self.events.record("adaptive_seed_eligible",count=len(self.verified),
                                action="disabled_by_configuration")
