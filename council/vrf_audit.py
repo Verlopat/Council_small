@@ -218,6 +218,41 @@ def objection_conflicts(question: str, ident: str, issue: str,
     return list({x["kind"]:x for x in notes}.values())
 
 
+def objection_scope_noise(question: str, issue: str, topic: str = "") -> str | None:
+    """Very narrow, advisory VRF *definition* review-scope exclusions.
+
+    These are excluded from author revision prompts, not deleted from the
+    original record. Never use this for concrete construction-specific
+    counterexamples or protocol proofs.
+    """
+    if (not re.search(r"\bVRF\b|verifiable random function",question,re.I)
+            or not isinstance(issue,str)):
+        return None
+    text=" ".join(issue.split())
+    if (re.search(r"\b(?:PPT|polynomial.time)\b",text,re.I) and
+        re.search(r"\b(?:no|omit\w*|lack\w*|missing|fail\w*)\b.{0,125}"
+                  r"\b(?:explicit\s+)?(?:bound|limit|number)\b.{0,70}"
+                  r"\b(?:queries|oracle|computational\s+resources?)\b",text,re.I)
+            and not re.search(r"\b(?:superpolynomial|unbounded\s+adversary)\b",
+                              text,re.I)):
+        return "ppt_resource_bounds_implicit"
+    if (re.search(r"\b(?:eval|evaluation)\b.{0,30}\b(?:oracle|sk)\b|"
+                  r"\boracle\b.{0,65}\b(?:secret\s+key|sk)\b",text,re.I) and
+        re.search(r"\b(?:implicitly?\s+assumes?|effectively|indirect\s+access|"
+                  r"requires?\s+(?:the\s+)?adversary)\b.{0,95}"
+                  r"\b(?:knows?|given|access|expos\w*|reveals?)\b"
+                  r".{0,50}\b(?:secret\s+key|sk)\b",text,re.I)):
+        return "evaluation_oracle_does_not_reveal_sk"
+    if (re.search(r"\blinear\s+combinations?\b.{0,110}"
+                  r"\b(?:inputs?|queries|challenge)\b",text,re.I) and
+        re.search(r"\b(?:lattice.based|some\s+constructions?|many\s+"
+                  r"constructions?)\b",text,re.I) and
+        not re.search(r"\b(?:explicit\s+attack|counterexample|"
+                      r"concrete\s+scheme|named\s+construction)\b",text,re.I)):
+        return "scheme_specific_attack_not_definition_gap"
+    return None
+
+
 def classify_objections(question: str, objections: list[dict]) -> tuple[list[dict],list[dict]]:
     """Partition advisory RFC conflicts from other objections, preserving raw text.
 
