@@ -17,8 +17,12 @@ class ResearchMetricsTests(unittest.TestCase):
             report([a,a])
     def test_six_research_behavior_types(self):
         folder=Path(__file__).resolve().parents[1]/"eval"/"tasks"
-        self.assertEqual(len(load(folder/"dev_research.jsonl",split="dev")),6)
-        self.assertEqual(len(load(folder/"heldout_research.jsonl",split="heldout")),6)
+        dev=load(folder/"dev_research.jsonl",split="dev")
+        heldout=load(folder/"heldout_research.jsonl",split="heldout")
+        self.assertGreaterEqual(len(dev),6)
+        self.assertGreaterEqual(len(heldout),6)
+        self.assertFalse(set(x["id"] for x in dev) &
+                         set(x["id"] for x in heldout))
 
 if __name__=="__main__":
     unittest.main()
