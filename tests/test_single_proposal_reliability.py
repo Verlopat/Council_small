@@ -39,6 +39,8 @@ class SingleProposalReliabilityTests(unittest.TestCase):
         calls=[]
         rows=[]
         class Index:
+            def retrieve(self,heading,limit=30):
+                return []
             def rfc_section_excerpt(self,section,max_chars=6000):
                 return {"section":section,"excerpt":refs[section],
                         "truncated":False,"document_id":"rfc9381"}
@@ -126,7 +128,7 @@ class SingleProposalReliabilityTests(unittest.TestCase):
         self.assertEqual(len(messages),2)
         self.assertIn("previous response was a list of tasks",messages[1])
         self.assertIn("ACTUAL SECURITY GAME RULES",messages[1])
-        self.assertTrue(any(e[0]=="format_retry_requested" for e in events))
+        self.assertTrue(any(e[0][0]=="format_retry_requested" for e in events))
 
     def test_plan_heuristic_accepts_substantive_definitions_with_define_verb(self):
         approach=("[S1] Define full uniqueness as the game in which the "
