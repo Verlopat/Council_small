@@ -16,9 +16,9 @@ class ResearchMetricsTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             report([a,a])
     def test_six_research_behavior_types(self):
-        path=Path(__file__).resolve().parents[1]/"eval"/"tasks"/"research_cases.jsonl"
-        self.assertEqual(len(load(path,split="dev")),6)
-        self.assertEqual(len(load(path,split="heldout")),6)
+        folder=Path(__file__).resolve().parents[1]/"eval"/"tasks"
+        self.assertEqual(len(load(folder/"dev_research.jsonl",split="dev")),6)
+        self.assertEqual(len(load(folder/"heldout_research.jsonl",split="heldout")),6)
 
 if __name__=="__main__":
     unittest.main()
