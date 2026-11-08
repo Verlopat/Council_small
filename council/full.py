@@ -35,8 +35,8 @@ from council.workflow import CouncilRunner
 from council.requirements import Requirements
 from council.vrf_sanity import scan_vrf_games
 from council.vrf_audit import (scan_audit_issues, classify_objections,
-                               objection_conflicts, partition_addressed_objections,
-                               deduplicate_objections)
+                               objection_conflicts, objection_scope_noise,
+                               partition_addressed_objections, deduplicate_objections)
 from council.definition_sources import (classify as definition_kind, consult as consult_definition,
                                         game_step, SECTION_HEADINGS, is_summary, topic_text)
 
@@ -676,6 +676,42 @@ class FullCouncilRunner(CouncilRunner):
                 sections.add(section)
         return {key:refs[key] for key in sorted(sections)}
 
+    def _triage_revision_objections(self, question: str,
+                                    rfc_refs: dict[str,dict]) -> tuple[list[dict],list[Objection]]:
+        """Gate unsafe objections BEFORE revision or moderator exposure.
+
+        Only narrow RFC-conflict patterns with a complete official section
+        are withheld as RFC conflicts. Nondefinitional review noise is kept
+        separately. Every raw objection stays in the run's audit ledger.
+        """
+        groups={"1_full_uniqueness":"3.1",
+                "2_trusted_uniqueness":"3.3",
+                "3_pseudorandomness":"3.4"}
+        blockers={"contradicts_rfc_3_1_uniqueness_is_not_collision",
+                  "contradicts_rfc_3_3_sk_known",
+                  "contradicts_rfc_3_4_no_challenge_proof"}
+        withheld,eligible=[],[]
+        for objection in self.objections:
+            claim=self.ledger.claims.get(objection.claim_id)
+            topic=topic_of(claim.statement) if claim is not None else ""
+            section=groups.get(topic)
+            flags=(objection_conflicts(question,objection.id,
+                                     objection.issue,topic)
+                   if section in rfc_refs else [])
+            kinds=[f["kind"] for f in flags if f["kind"] in blockers]
+            noise=objection_scope_noise(question,objection.issue,topic)
+            if kinds or noise:
+                withheld.append({
+                    "id":objection.id,"claim_id":objection.claim_id,
+                    "kinds":kinds or ["nondefinitional_"+noise],
+                    "rfc_section":section if kinds else None,
+                    "issue":objection.issue,
+                    "reference_complete":bool(kinds),
+                    "reason":"rfc_conflict" if kinds else "out_of_scope"})
+            else:
+                eligible.append(objection)
+        return withheld,eligible
+
     def _review_payload(self, question: str, proposal: dict,
                         *, recheck: bool = False) -> dict:
         """Bounded review input: claims and the exact sentences they cite.
@@ -936,31 +972,11 @@ class FullCouncilRunner(CouncilRunner):
                     continue
                 self.objections.append(obj)
                 self.events.record("review_received",objection=asdict(obj))
-        # SECURITY / CORRECTNESS ORDERING: classify critic assertions against
-        # the official RFC BEFORE a reviewer can influence an author's
-        # revision, moderator state, or repair priority. Keep every original
-        # objection in the audit ledger, including withheld ones.
-        groups={"1_full_uniqueness":"3.1",
-                "2_trusted_uniqueness":"3.3",
-                "3_pseudorandomness":"3.4"}
-        blockers={"contradicts_rfc_3_1_uniqueness_is_not_collision",
-                  "contradicts_rfc_3_3_sk_known",
-                  "contradicts_rfc_3_4_no_challenge_proof"}
-        withheld=[]
-        revision_objections=[]
-        for o in self.objections:
-            claim=self.ledger.claims.get(o.claim_id)
-            topic=topic_of(claim.statement) if claim is not None else ""
-            section=groups.get(topic)
-            flags=(objection_conflicts(question,o.id,o.issue,topic)
-                   if section in rfc_refs else [])
-            kinds=[f["kind"] for f in flags if f["kind"] in blockers]
-            if kinds:
-                withheld.append({"id":o.id,"claim_id":o.claim_id,
-                                 "kinds":kinds,"rfc_section":section,
-                                 "issue":o.issue,"reference_complete":True})
-                continue
-            revision_objections.append(o)
+        # Do not expose untrusted critic corrections to the author or the
+        # moderator until their RFC-game meaning has been screened.
+        withheld,revision_objections=self._triage_revision_objections(
+            question,rfc_refs)
+        for o in revision_objections:
             try:
                 self.moderator.submit(Message("review:"+o.id,o.claim_id,
                     Act.CHALLENGE,o.reviewer_family,o.reviewer_family,
@@ -970,7 +986,8 @@ class FullCouncilRunner(CouncilRunner):
         self.events.record("objections_withheld_from_revision",
             ids=[o["id"] for o in withheld],
             kinds=[o["kinds"] for o in withheld],
-            rfc_sections=sorted({o["rfc_section"] for o in withheld}),
+            rfc_sections=sorted({o["rfc_section"] for o in withheld
+                                 if o["rfc_section"] is not None}),
             retained_in_audit=True)
         for p in proposals:
             if self.budget.debate_remaining()<=1:break
