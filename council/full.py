@@ -38,7 +38,8 @@ from council.vrf_audit import (scan_audit_issues, classify_objections,
                                objection_conflicts, objection_scope_noise,
                                partition_addressed_objections, deduplicate_objections)
 from council.definition_sources import (classify as definition_kind, consult as consult_definition,
-                                        game_step, SECTION_HEADINGS, is_summary, topic_text)
+                                        game_step, is_vrf_definition_question,
+                                        SECTION_HEADINGS, is_summary, topic_text)
 
 # Four-solvers variant would leave no reliable independently reserved auditing
 # family given the currently configured MiniMax limitation, so default to three.
@@ -303,6 +304,32 @@ class FullCouncilRunner(CouncilRunner):
             return
         question=(self.requirements.objective
                   if self.requirements else self._current_question)
+        if is_vrf_definition_question(question):
+            # Game definitions are text-reference comparisons. A translator
+            # cannot mechanically verify them, and repeatedly calling GLM
+            # for repairs wastes the free-tier budget.
+            definition=definition_kind(question,claim.statement)
+            if definition is not None:
+                heading,section=definition
+                check=consult_definition(self.paper_index,heading,section,claim.id)
+                self.reference_checks.append(check)
+                self.events.record("definition_reference_checked",**check)
+                self.extra_obligations.append(
+                    claim.id+": RFC 9381 §"+section+
+                    " reference provenance located; semantic alignment "
+                    "remains advisory and unverified")
+            elif re.search(r"\breduc\w*\b|\b(?:lwe|sis)\b|"
+                           r"\b(?:conjectur\w*|theorem|hardness)\b",
+                           claim.statement,re.I):
+                self.extra_obligations.append(
+                    claim.id+": scheme-specific reduction/security assertion "
+                    "not validated by a game definition; separate proof needed")
+            else:
+                self.extra_obligations.append(
+                    claim.id+": game-step/source alignment needs RFC review")
+            self.events.record("translator_skipped",claim_id=claim.id,
+                               reason="definitional_question")
+            return
         definition=definition_kind(question,claim.statement)
         if definition is None and game_step(question,claim.statement):
             definition=self._definition_context_by_claim.get(claim.id)
