@@ -20,7 +20,9 @@ the challenger/adversary steps, winning condition and forbidden queries,
 without inventing a construction or asserting an unproved reduction.
 If required details are not established, identify the precise gap.
 When DATA_JSON includes reference_sections from the official indexed RFC 9381,
-use their full verbatim text as the authoritative security-game definitions.
+use the supplied verbatim passages to guide the game definitions.
+Some providers receive explicitly marked SHORT drafting excerpts rather
+than entire sections; do not mistake a partial excerpt for full verification.
 Distinguish full uniqueness (§3.1: one input, different accepted outputs under
 an adversary-produced public key), collision resistance (§3.2: different
 inputs and the same output), trusted uniqueness (§3.3: honest keys even if
@@ -56,6 +58,12 @@ for the SAME input and fixed public key; collision resistance forbids one
 valid output for DIFFERENT inputs. Full uniqueness permits malicious public
 keys; trusted uniqueness assumes honest key generation even if SK is known.
 VRF pseudorandomness provides only the challenge output, never its proof.
+The pseudorandomness target input MUST NOT have been queried to the evaluation/
+proof oracle BEFORE the challenge, and MUST NOT be queried AFTER the challenge.
+Non-target oracle queries provide the real evaluation output and proof.
+If DATA_JSON.output_limits specifies max_claims=5, write no more than FIVE
+short atomic claims and at most FIVE numbered approach lines; do not expand
+into a research plan or recite the RFC. Prefer game definitions over hypotheses.
 Distinguish honest-key from malicious-key threat models;
 never assert that a specific hardness assumption proves a property without
 a construction-specific argument.""",
