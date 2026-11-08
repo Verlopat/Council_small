@@ -633,6 +633,49 @@ class FullCouncilRunner(CouncilRunner):
         self.events.record("run_finished",result=result)
         return result
 
+    def _rfc_game_references(self, question: str) -> dict[str,dict]:
+        """Fetch only complete, officially indexed RFC 9381 game sections.
+
+        The reference is common public context for every independent solver.
+        Missing/truncated/untrusted text is never silently treated as the RFC.
+        """
+        if not re.search(r"\\bVRF\\b|verifiable random function",question,re.I):
+            return {}
+        refs={}
+        if self.paper_index is None:
+            return refs
+        for section in ("3.1","3.3","3.4"):
+            try:
+                row=self.paper_index.rfc_section_excerpt(section,max_chars=10000)
+            except (AttributeError,ValueError):
+                row=None
+            if (isinstance(row,dict) and row.get("excerpt")
+                    and not row.get("truncated")
+                    and row.get("section")==section
+                    and row.get("document_id")=="rfc9381"
+                    and row.get("source_uri")=="https://www.rfc-editor.org/rfc/rfc9381.txt"):
+                refs[section]=row
+        return refs
+
+    def _reference_for_claims(self, claim_ids: list[str],
+                              refs: dict[str,dict]) -> dict[str,dict]:
+        sections=set()
+        groups={"1_full_uniqueness":"3.1",
+                "2_trusted_uniqueness":"3.3",
+                "3_pseudorandomness":"3.4"}
+        for cid in claim_ids:
+            claim=self.ledger.claims.get(cid)
+            if claim is None:
+                continue
+            topic=topic_of(claim.statement)
+            section=groups.get(topic)
+            if section is None:
+                original=self._definition_context_by_claim.get(cid)
+                section=original[1] if original else None
+            if section and section in refs:
+                sections.add(section)
+        return {key:refs[key] for key in sorted(sections)}
+
     def _review_payload(self, question: str, proposal: dict,
                         *, recheck: bool = False) -> dict:
         """Bounded review input: claims and the exact sentences they cite.
