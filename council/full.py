@@ -1740,8 +1740,34 @@ class FullCouncilRunner(CouncilRunner):
                 "topic":topic_of(claim.statement) if claim else "",
                 "target_statement":target_text(cid),
                 "issue":issue})
-        rfc_conflicts, unclassified=classify_objections(question,all_objections)
+        # Do not re-label quote-grounded objection decisions as unresolved
+        # merely because the final regex pass runs after author revisions.
+        grounded=self.grounded_objection_verdicts
+        dismissed_ids={oid for oid,row in grounded.items()
+                       if row.get("grounded") and
+                       row.get("verdict") in {
+                           "contradicts_reference","already_in_claim","out_of_scope"}}
+        scoped=[row for row in all_objections if row["id"] not in dismissed_ids]
+        rfc_conflicts, unclassified=classify_objections(question,scoped)
         already_addressed, still_open=partition_addressed_objections(unclassified)
+        out_of_scope=[]
+        for row in all_objections:
+            decision=grounded.get(row["id"],{})
+            if row["id"] not in dismissed_ids:
+                continue
+            entry={k:v for k,v in row.items()
+                   if k not in {"target_statement","target_text"}}
+            entry["reference_quote"]=decision.get("quote")
+            entry["rfc_section"]=decision.get("section")
+            entry["advisory_status"]="model_quote_grounded_"+decision["verdict"]
+            if decision["verdict"]=="contradicts_reference":
+                rfc_conflicts.append(dict(entry,
+                    vrf_warnings=["grounded_contradicts_reference"]))
+            elif decision["verdict"]=="already_in_claim":
+                already_addressed.append(dict(entry,
+                    matched_requirement="exact_claim_quote_grounded"))
+            else:
+                out_of_scope.append(entry)
         # Classification precedes text deduplication. Two similar criticisms
         # against different targets may have different statuses; never merge
         # away a real objection merely because another was already addressed.
@@ -1779,6 +1805,8 @@ class FullCouncilRunner(CouncilRunner):
             "audit_advisory_findings":audit_advisories,
             "rfc_conflicting_objections":rfc_conflicts,
             "already_addressed_objections":already_addressed,
+            "grounded_out_of_scope_objections":out_of_scope,
+            "grounded_objection_verdicts":grounded,
             "topic_consolidation":topic_consolidation,
             "reference_checks":self.reference_checks,
             "judge_source":("local_policy" if local_judge else
