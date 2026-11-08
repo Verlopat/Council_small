@@ -289,8 +289,11 @@ def main(argv=None) -> int:
             source = result.get("judge_source", "model")
             label = ("Local evidence verdict" if source == "local_policy"
                      else "Judge verdict")
+            human_cause=("definitional answer; no mechanical verification "
+                         "possible from game text alone"
+                         if detail=="definition_reference_only" else detail)
             print(label + ": " + str(verdict.get("status", "unresolved")) +
-                  (" | cause: " + str(detail) if detail else ""))
+                  (" | cause: " + str(human_cause) if human_cause else ""))
         print("\nProposed approach (solver original):\n" +
               (brief["proposed_approach"] or "(none)"))
         if brief.get("judge_summary"):
