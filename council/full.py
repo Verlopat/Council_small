@@ -34,9 +34,9 @@ from council.compose import compose_answer
 from council.workflow import CouncilRunner
 from council.requirements import Requirements
 from council.vrf_sanity import scan_vrf_games
-from council.vrf_audit import (scan_audit_issues, classify_objections,
-                               objection_conflicts, objection_scope_noise,
-                               partition_addressed_objections, deduplicate_objections)
+from council.vrf_audit import (scan_audit_issues, objection_conflicts,
+                               objection_scope_noise)
+from council.objection_sections import presentation_sections
 from council.definition_sources import (classify as definition_kind, consult as consult_definition,
                                         game_step, is_vrf_definition_question,
                                         SECTION_HEADINGS, is_summary, topic_text)
@@ -1842,61 +1842,34 @@ class FullCouncilRunner(CouncilRunner):
                 "topic":topic_of(claim.statement) if claim else "",
                 "target_statement":target_text(cid),
                 "issue":issue})
-        # Do not re-label quote-grounded objection decisions as unresolved
-        # merely because the final regex pass runs after author revisions.
+        # One exclusive display section per objection, with grounded
+        # verdicts taking precedence over regex (and over prior heuristics).
         grounded=self.grounded_objection_verdicts
-        dismissed_ids={oid for oid,row in grounded.items()
-                       if row.get("grounded") and
-                       row.get("verdict") in {
-                           "contradicts_reference","already_in_claim","out_of_scope"}}
-        scoped=[row for row in all_objections if row["id"] not in dismissed_ids]
-        rfc_conflicts, unclassified=classify_objections(question,scoped)
-        already_addressed, still_open=partition_addressed_objections(unclassified)
-        out_of_scope=[]
-        for row in all_objections:
-            decision=grounded.get(row["id"],{})
-            if row["id"] not in dismissed_ids:
-                continue
-            entry={k:v for k,v in row.items()
-                   if k not in {"target_statement","target_text"}}
-            entry["reference_quote"]=decision.get("quote")
-            entry["rfc_section"]=decision.get("section")
-            entry["advisory_status"]="model_quote_grounded_"+decision["verdict"]
-            if decision["verdict"]=="contradicts_reference":
-                rfc_conflicts.append(dict(entry,
-                    vrf_warnings=["grounded_contradicts_reference"]))
-            elif decision["verdict"]=="already_in_claim":
-                already_addressed.append(dict(entry,
-                    matched_requirement="exact_claim_quote_grounded"))
-            else:
-                out_of_scope.append(entry)
-        # Classification precedes text deduplication. Two similar criticisms
-        # against different targets may have different statuses; never merge
-        # away a real objection merely because another was already addressed.
-        rfc_conflicts=deduplicate_objections([
-            {k:v for k,v in row.items()
-             if k not in {"target_text","target_statement"}}
-            for row in rfc_conflicts])
-        already_addressed=deduplicate_objections(already_addressed)
-        still_open=deduplicate_objections(still_open)
+        sections=presentation_sections(
+            question,all_objections,withheld,grounded,
+            require_grounded=is_vrf_definition_question(question))
+        withheld=sections["withheld"]
+        rfc_conflicts=sections["conflicts"]
+        already_addressed=sections["addressed"]
+        still_open=sections["open"]
+        unjudged=sections["unjudged"]
+        out_of_scope=sections["out_of_scope"]
         self.events.record("objection_display_deduplicated",
             raw_count=len(all_objections),
-            displayed_count=sum(map(len,(rfc_conflicts,already_addressed,still_open))),
+            displayed_count=sum(map(len,sections.values())),
+            grounded_open=len(still_open),
+            unjudged=len(unjudged),
             preserved_in_records=True)
-        # All raw criticisms remain in structured records. Only the
-        # human-readable shortlist is bounded; prefer source-quoted valid
-        # criticisms, then reviewers, then other unresolved assertions.
-        prioritized=sorted(still_open,key=lambda row:(
-            0 if grounded.get(row["id"],{}).get("verdict")=="valid"
-                 and grounded.get(row["id"],{}).get("grounded") else
-            1 if row.get("source")=="reviewer" else 2,
-            row["id"]))
+        # Limit only the human-readable shortlist. Never discard raw records.
+        prioritized=still_open
         displayed=prioritized[:8]
         omitted=max(0,len(prioritized)-len(displayed))
         brief.unresolved_objections=list(dict.fromkeys(
             self.coverage+
             [row["id"]+": "+row["issue"]+
-             (" (not independently resolved)" if row["source"]=="reviewer" else "")+
+             (" (source-quoted, model-advisory; not independently verified)"
+              if row.get("advisory_status")=="grounded_valid" else
+              " (not independently resolved)")+
              (" [similar objection IDs: "+", ".join(
                     str(i) for i in row["duplicate_ids"])+"]"
                  if row.get("duplicate_ids") else "")
@@ -1921,6 +1894,8 @@ class FullCouncilRunner(CouncilRunner):
             "audit_advisory_findings":audit_advisories,
             "rfc_conflicting_objections":rfc_conflicts,
             "already_addressed_objections":already_addressed,
+            "open_objections":still_open,
+            "unjudged_objections":unjudged,
             "unresolved_objections_all":prioritized,
             "unresolved_objections_display_omitted":omitted,
             "grounded_out_of_scope_objections":out_of_scope,
