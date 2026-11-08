@@ -40,6 +40,7 @@ class CouncilRunner:
             return None
 
         original_message = prompt(role, data)
+        last_format_error = None
         # Proposals, blind judges and topic judges get one bounded format retry.
         # Retry modifies formatting instructions, not the task or raw answer.
         # Never feed rejected model text back as privileged instructions.
@@ -50,7 +51,21 @@ class CouncilRunner:
                     self.warnings.append(role + "/" + family +
                                          ": format retry unavailable")
                     return None
-                if role == "proposal":
+                if role == "proposal" and last_format_error == "plan_not_answer":
+                    formatting = (
+                        "Your previous response was a list of tasks (for example "
+                        "Define/Describe/Outline the games), not an actual answer. "
+                        "REWRITE the approach as the ACTUAL SECURITY GAME RULES, "
+                        "not instructions to define them later. For EACH game "
+                        "give the key generation and adversary key knowledge, "
+                        "oracle queries and their outputs where applicable, "
+                        "the exact challenge and forbidden target queries for "
+                        "pseudorandomness, and the precise adversarial win "
+                        "condition. Full uniqueness is one input with two "
+                        "different accepting outputs; collision resistance is "
+                        "two inputs with the same output. Use [S1] etc. "
+                        "Return complete JSON with anchored claims. ")
+                elif role == "proposal":
                     formatting = (
                         "Output ONE complete JSON object with nonempty approach, "
                         "at least one anchored claim, hypotheses and experiments. "
@@ -108,6 +123,8 @@ class CouncilRunner:
                 # Never print raw user prompts or provider text in diagnostics;
                 # output/schema error strings describe only parser constraints.
                 reason = str(error).splitlines()[0][:180]
+                last_format_error = ("plan_not_answer" if reason.startswith("plan_not_answer")
+                                     else "invalid_format")
                 self.events.record("role_parse_error", role=role, family=family,
                                    provider=response.provider, model=response.model,
                                    reason=reason, attempt=attempt + 1)
