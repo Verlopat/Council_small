@@ -53,7 +53,9 @@ class CohereTests(unittest.TestCase):
                 'message': {'content': [{'type': 'text', 'text': 'partial'}]}}):
                 with self.assertRaises(CandidateError) as raised:
                     self.router.generate(self.candidate, 'question')
-                self.assertEqual(raised.exception.kind, 'invalid_response')
+                expected={'MAX_TOKENS':'output_truncated','TIMEOUT':'timeout',
+                          'ERROR':'invalid_response','TOOL_CALL':'invalid_response'}
+                self.assertEqual(raised.exception.kind, expected[reason])
 
     def test_empty_and_invalid_cohere_replies_rejected(self):
         for message in ({'content': []}, {'content': 'wrong shape'}, 'bad shape'):
