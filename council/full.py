@@ -870,6 +870,7 @@ class FullCouncilRunner(CouncilRunner):
                 # Quoting the claim itself is NOT independent evidence that
                 # an objection contradicts the RFC; require an RFC quote.
                 allowed=(
+                    verdict=="valid" and (in_reference or in_claim) or
                     verdict=="contradicts_reference" and in_reference or
                     verdict=="already_in_claim" and in_claim or
                     verdict=="out_of_scope" and (in_reference or in_claim))
@@ -882,9 +883,11 @@ class FullCouncilRunner(CouncilRunner):
             self.events.record("objection_judge_batch",
                 section=section,submitted=len(candidates),
                 returned=sum(o.id in outcomes for o,c in candidates),
-                dismissed=sum(o.id in outcomes and
-                              outcomes[o.id]["grounded"]
-                              for o,c in candidates))
+                dismissed=sum(
+                    o.id in outcomes and outcomes[o.id]["grounded"]
+                    and outcomes[o.id]["verdict"] in {
+                        "contradicts_reference","already_in_claim","out_of_scope"}
+                    for o,c in candidates))
         return outcomes
 
     def _triage_revision_objections(self, question: str,
@@ -1791,6 +1794,16 @@ class FullCouncilRunner(CouncilRunner):
             raw_count=len(all_objections),
             displayed_count=sum(map(len,(rfc_conflicts,already_addressed,still_open))),
             preserved_in_records=True)
+        # All raw criticisms remain in structured records. Only the
+        # human-readable shortlist is bounded; prefer source-quoted valid
+        # criticisms, then reviewers, then other unresolved assertions.
+        prioritized=sorted(still_open,key=lambda row:(
+            0 if grounded.get(row["id"],{}).get("verdict")=="valid"
+                 and grounded.get(row["id"],{}).get("grounded") else
+            1 if row.get("source")=="reviewer" else 2,
+            row["id"]))
+        displayed=prioritized[:8]
+        omitted=max(0,len(prioritized)-len(displayed))
         brief.unresolved_objections=list(dict.fromkeys(
             self.coverage+
             [row["id"]+": "+row["issue"]+
@@ -1798,7 +1811,10 @@ class FullCouncilRunner(CouncilRunner):
              (" [similar objection IDs: "+", ".join(
                     str(i) for i in row["duplicate_ids"])+"]"
                  if row.get("duplicate_ids") else "")
-             for row in still_open]))
+             for row in displayed]+
+            (["And "+str(omitted)+" additional unresolved objections; "
+              "see unresolved_objections_all in structured output"]
+             if omitted else [])))
         brief.completion_status=("partial" if proposals else "unresolved")
         brief.limitations=list(dict.fromkeys(brief.limitations+self.warnings))
         result={"research_result":brief.to_dict(),"proposals":proposals,
@@ -1815,6 +1831,8 @@ class FullCouncilRunner(CouncilRunner):
             "audit_advisory_findings":audit_advisories,
             "rfc_conflicting_objections":rfc_conflicts,
             "already_addressed_objections":already_addressed,
+            "unresolved_objections_all":prioritized,
+            "unresolved_objections_display_omitted":omitted,
             "grounded_out_of_scope_objections":out_of_scope,
             "grounded_objection_verdicts":grounded,
             "topic_consolidation":topic_consolidation,
