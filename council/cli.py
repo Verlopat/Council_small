@@ -13,6 +13,104 @@ from council.families import FAMILIES
 from council.transport import FamilyTransport
 from council.workflow import CouncilRunner, DEFAULT_SOLVERS, JUDGE, AUDITOR
 
+def print_compact_result(result: dict, run_id: str, run_dir: Path) -> None:
+    """Readable default report; complete diagnostics remain in --verbose/--json."""
+    brief=result.get("research_result") or {}
+    print("\nRun: "+run_id+" | status: "+str(brief.get("completion_status","unknown")))
+    topics=result.get("topic_consolidation") or []
+    if topics:
+        print("\nBest answer per game (RFC alignment; advisory, not verified):")
+        for row in topics:
+            title=str(row.get("topic","")).replace("_"," ").title()
+            summary=str(row.get("summary") or row.get("best_statement") or "")
+            selected=row.get("best_version_id")
+            if selected:
+                print("- "+title+" [§"+str(row.get("section") or "?")+"] "+
+                      "["+str(selected)+"]: "+summary[:550])
+            else:
+                print("- "+title+": No fully selected source-aligned version. "+
+                      (summary[:240] if row.get("reference_complete")
+                       else "Source comparison unavailable."))
+            missing=row.get("missing") or []
+            if missing:
+                print("  Missing: "+"; ".join(str(x) for x in missing[:2])[:260])
+    if brief.get("judge_summary"):
+        print("\nJudge summary (advisory, not independent proof):\n"+
+              str(brief["judge_summary"])[:1800])
+    elif not topics:
+        print("\nProposed approach (unverified):\n"+
+              str(brief.get("proposed_approach") or "(no proposal)")[:1400])
+    sections=result.get("open_objections")
+    if isinstance(sections,list):
+        print("\nOpen objections (source-quoted valid, advisory):")
+        for row in sections[:6]:
+            print("- "+str(row.get("id",""))+": "+
+                  str(row.get("issue",""))[:350])
+        if not sections:
+            print("(none grounded; unjudged issues remain in the audit records)")
+        if len(sections)>6:
+            print("... "+str(len(sections)-6)+" more in structured records")
+    else:
+        remaining=brief.get("unresolved_objections") or []
+        if remaining:
+            print("\nUnresolved objections (not independently verified):")
+            for issue in remaining[:4]:
+                print("- "+str(issue)[:350])
+    # Local patterns are noisy; print them by default ONLY for the selected
+    # version or a version that the topic judge explicitly contradicted.
+    selected={row.get("best_version_id") for row in topics
+              if row.get("best_version_id")}
+    contradicted={v.get("id") for row in topics
+                  for v in row.get("versions",[]) or []
+                  if v.get("status")=="contradicts"}
+    watch=selected|contradicted
+    all_findings=((result.get("advisory_findings") or [])+
+                  (result.get("audit_advisory_findings") or []))
+    messages=[]
+    for entry in all_findings:
+        if entry.get("claim_id") in watch:
+            notice=(str(entry.get("claim_id"))+": "+
+                    str(entry.get("message") or ""))
+            if notice not in messages:
+                messages.append(notice)
+    if messages:
+        print("\nSelected/contradicted-claim warnings (heuristic):")
+        for notice in messages[:4]:
+            print("- "+notice[:300])
+        if len(messages)>4:
+            print("... "+str(len(messages)-4)+" more with --verbose")
+    coverage=result.get("role_coverage") or {}
+    if coverage:
+        actual=coverage.get("valid_proposer_families") or []
+        expected=coverage.get("requested_solvers") or []
+        print("\nCoverage: "+str(len(actual))+"/"+str(len(expected))+
+              " valid solvers; independent audit "+
+              ("completed" if coverage.get("independent_audit_completed")
+               else "unavailable"))
+    verdict=result.get("verdict") or {}
+    if verdict:
+        cause=verdict.get("cause")
+        if cause=="definition_reference_only":
+            cause="game-text comparison cannot certify cryptographic correctness"
+        print("Evidence verdict: "+str(verdict.get("status","unresolved"))+
+              (" ("+str(cause)+")" if cause else ""))
+    warnings=result.get("warnings") or []
+    provider_failures=[str(item) for item in warnings
+                       if (("unavailable" in str(item).casefold()
+                            or "rate_limit" in str(item).casefold()
+                            or "timeout" in str(item).casefold())
+                           and str(item).startswith(
+                               ("proposal/","judge/","topic_judge/","audit/",
+                                "objection_judge/","translate/","repair/"))]
+    if provider_failures:
+        print("Provider failures: "+" | ".join(provider_failures[:2])[:380])
+    pending=result.get("unjudged_objections") or []
+    if pending:
+        print("Unjudged objections retained in records: "+str(len(pending)))
+    print("Run records: "+str(run_dir/(run_id+".sqlite3"))+
+          " (use --verbose or --json for details)")
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="Evidence-aware multi-model research council")
     parser.add_argument("question", nargs="*", help="A research question")
@@ -40,6 +138,8 @@ def main(argv=None) -> int:
     parser.add_argument("--provider-report", action="store_true",
                         help="Show all configured provider lineages and local free-key eligibility without API calls")
     parser.add_argument("--json", action="store_true", help="Print complete JSON results")
+    parser.add_argument("--verbose", action="store_true",
+                        help="Print full reviewer, claim, source and obligation diagnostics")
     args = parser.parse_args(argv)
     if args.paper_index is not None and not args.paper_index.is_file():
         parser.error("--paper-index must identify an existing SQLite corpus")
@@ -225,6 +325,8 @@ def main(argv=None) -> int:
                 paper_index.close()
     if args.json:
         print(json.dumps(result, ensure_ascii=False, indent=2))
+    elif not args.verbose:
+        print_compact_result(result,run_id,args.run_dir)
     else:
         brief = result["research_result"]
         print("\nRun: " + run_id + " | status: " + brief["completion_status"])
@@ -318,6 +420,16 @@ def main(argv=None) -> int:
                              if o.get("rfc_section") else "")+
                             " — "+str(o.get("issue") or "")[:350]
                             for o in withheld))
+        unjudged=result.get("unjudged_objections") or []
+        if unjudged:
+            print("\nUnjudged objections (not sent to authors):\n"+
+                  "\n".join("- "+str(o.get("id"))+": "+
+                            str(o.get("issue",""))[:370] for o in unjudged))
+        other=result.get("grounded_out_of_scope_objections") or []
+        if other:
+            print("\nGrounded out-of-scope objections:\n"+
+                  "\n".join("- "+str(o.get("id"))+": "+
+                            str(o.get("issue",""))[:370] for o in other))
         already=result.get("already_addressed_objections") or []
         if already:
             print("\nObjections already addressed by their cited claim "
