@@ -326,7 +326,10 @@ def main(argv=None) -> int:
             if paper_index is not None:
                 paper_index.close()
     if args.json:
-        print(json.dumps(result, ensure_ascii=False, indent=2))
+        # Include the exact local run ID so offline benchmarks can inspect
+        # recorded provider attempts, including failed/retried calls.
+        print(json.dumps(dict(result,run_id=run_id),
+                         ensure_ascii=False, indent=2))
     elif not args.verbose:
         print_compact_result(result,run_id,args.run_dir)
     else:
