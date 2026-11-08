@@ -639,7 +639,7 @@ class FullCouncilRunner(CouncilRunner):
         The reference is common public context for every independent solver.
         Missing/truncated/untrusted text is never silently treated as the RFC.
         """
-        if not re.search(r"\\bVRF\\b|verifiable random function",question,re.I):
+        if not re.search(r"\bVRF\b|verifiable random function",question,re.I):
             return {}
         refs={}
         if self.paper_index is None:
