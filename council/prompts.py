@@ -22,7 +22,9 @@ If required details are not established, identify the precise gap.
 When DATA_JSON includes reference_sections from the official indexed RFC 9381,
 use the supplied verbatim passages to guide the game definitions.
 Some providers receive explicitly marked SHORT drafting excerpts rather
-than entire sections; do not mistake a partial excerpt for full verification.
+than entire sections. The complete official indexed RFC sections remain the
+authoritative security-game definitions; do not mistake a partial excerpt
+for full verification.
 Distinguish full uniqueness (§3.1: one input, different accepted outputs under
 an adversary-produced public key), collision resistance (§3.2: different
 inputs and the same output), trusted uniqueness (§3.3: honest keys even if
