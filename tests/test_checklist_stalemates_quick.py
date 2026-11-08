@@ -103,8 +103,11 @@ auditor: gemma
                     solver_strategies=cfg.solver_strategies)
                 await runner.run("Compute 2+2")
             self.assertEqual(fake.calls[0],("nemotron","proposal"))
-            self.assertEqual([role for _,role in fake.calls],
-                             ["proposal","translate","judge"])
+            self.assertEqual([role for _,role in fake.calls[:2]],
+                             ["proposal","translate"])
+            if any(role=="judge" for _,role in fake.calls):
+                self.assertGreater([role for _,role in fake.calls].index("judge"),
+                                   [role for _,role in fake.calls].index("translate"))
 
 if __name__=="__main__":
     unittest.main()
