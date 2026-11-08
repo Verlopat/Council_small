@@ -44,7 +44,7 @@ class CouncilRunner:
         # Proposals, blind judges and topic judges get one bounded format retry.
         # Retry modifies formatting instructions, not the task or raw answer.
         # Never feed rejected model text back as privileged instructions.
-        for attempt in range(2 if role in {"proposal", "judge", "topic_judge"} else 1):
+        for attempt in range(2 if role in {"proposal", "judge", "topic_judge", "objection_judge"} else 1):
             if attempt:
                 separator = "\nDATA_JSON:\n"
                 if separator not in original_message:
@@ -73,6 +73,14 @@ class CouncilRunner:
                         "assumptions, limitations, depends_on and dependency_argument. "
                         "Use [S1], [S2] numbered source lines and real explanations; "
                         "do not return a task list beginning Define/Outline/Propose. ")
+                elif role == "objection_judge":
+                    formatting = (
+                        "Return ONE JSON object with items (array) containing "
+                        "one entry per supplied id: {id, verdict, quote, reason}. "
+                        "verdict must be valid, contradicts_reference, "
+                        "already_in_claim or out_of_scope. For dismissals quote "
+                        "exact RFC text (or exact cited claim for already_in_claim). "
+                        "If unsure, classify as valid and do not suppress it. ")
                 elif role == "topic_judge":
                     formatting = (
                         "Output ONE complete JSON object with versions as an "
@@ -128,7 +136,7 @@ class CouncilRunner:
                 self.events.record("role_parse_error", role=role, family=family,
                                    provider=response.provider, model=response.model,
                                    reason=reason, attempt=attempt + 1)
-                if (role in {"proposal", "judge", "topic_judge"} and attempt == 0 and
+                if (role in {"proposal", "judge", "topic_judge", "objection_judge"} and attempt == 0 and
                         self.budget.allowed(30, synthesis=synthesis) > 2):
                     self.events.record("format_retry_requested",
                                        role=role, family=family,
