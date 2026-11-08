@@ -36,7 +36,7 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
                                             role="audit", synthesis=True)
             self.assertEqual(response.family, "glm")
             self.assertEqual(response.provider, "Cloudflare")
-            self.assertEqual([x[0] for x in fake.calls], ["Z.ai", "Cloudflare"])
+            self.assertEqual([x[0] for x in fake.calls], ["Z.ai", "Z.ai", "Cloudflare"])
             self.assertTrue(all(x[2] == "Original prompt" for x in fake.calls))
 
     async def test_cohere_requires_confirmed_trial_mode(self):
