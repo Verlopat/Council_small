@@ -956,6 +956,49 @@ class FullCouncilRunner(CouncilRunner):
                 eligible.append(objection)
         return withheld,eligible
 
+    @staticmethod
+    def _screen_revision_objections(
+            objections: list[Objection], regex_withheld: list[dict],
+            verdicts: dict[str,dict], *, require_grounded: bool
+            ) -> tuple[list[dict],list[Objection],list[dict]]:
+        """Grounded verdict overrides regex. Unknown claims never edit VRF games.
+
+        Regex is only a fallback for missing/untrusted model comparisons.
+        Every objection remains in the immutable audit collection.
+        """
+        by_id={item["id"]:item for item in regex_withheld}
+        withheld,eligible,pending=[],[],[]
+        for o in objections:
+            row=verdicts.get(o.id,{})
+            if row.get("grounded"):
+                if row.get("verdict")=="valid":
+                    eligible.append(o)
+                    continue
+                if row.get("verdict") in {
+                        "contradicts_reference","already_in_claim","out_of_scope"}:
+                    withheld.append({
+                        "id":o.id,"claim_id":o.claim_id,
+                        "issue":o.issue,"rfc_section":row.get("section"),
+                        "kinds":["grounded_"+row["verdict"]],
+                        "reason":row["verdict"],
+                        "quote":row.get("quote",""),
+                        "reference_complete":True})
+                    continue
+            fallback=by_id.get(o.id)
+            if fallback:
+                withheld.append(dict(fallback,
+                    reason="regex_fallback_"+str(fallback.get("reason","rfc_conflict"))))
+                continue
+            if require_grounded:
+                pending.append({"id":o.id,"claim_id":o.claim_id,
+                                "issue":o.issue,"reason":"unjudged",
+                                "reviewer_family":o.reviewer_family})
+            else:
+                # Preserve the Council's normal review mechanism for
+                # non-definitional research, which may have no RFC at all.
+                eligible.append(o)
+        return withheld,eligible,pending
+
     def _apply_revised_claim(self, p: dict, cid: str, changed: str,
                              item: dict) -> None:
         """Attach only new [R#] source provenance; old evidence never follows."""
@@ -1282,26 +1325,20 @@ class FullCouncilRunner(CouncilRunner):
                 self.events.record("review_received",objection=asdict(obj))
         # Do not expose untrusted critic corrections to the author or the
         # moderator until their RFC-game meaning has been screened.
-        withheld,revision_objections=self._triage_revision_objections(
+        regex_withheld,_=self._triage_revision_objections(
             question,rfc_refs)
-        # Grounded model comparisons are a second, quote-checked advisory
-        # gate. The raw objections remain in self.objections for audit.
+        # ALL objections are judged, including regex-flagged criticisms.
+        # Only a grounded "valid" result can influence authors on a VRF
+        # definition question. Ungrounded/unseen judgments are UNJUDGED.
         self.grounded_objection_verdicts=await self._ground_objections(
-            rfc_refs,revision_objections)
-        screened=[]
-        for o in revision_objections:
-            verdict=self.grounded_objection_verdicts.get(o.id,{})
-            if verdict.get("grounded") and verdict.get("verdict") in {
-                    "contradicts_reference","already_in_claim","out_of_scope"}:
-                withheld.append({
-                    "id":o.id,"claim_id":o.claim_id,
-                    "kinds":["grounded_"+verdict["verdict"]],
-                    "rfc_section":verdict["section"],"issue":o.issue,
-                    "quote":verdict["quote"],"reason":verdict["verdict"],
-                    "reference_complete":True})
-            else:
-                screened.append(o)
-        revision_objections=screened
+            rfc_refs,self.objections)
+        withheld,revision_objections,unjudged_before_revision=(
+            self._screen_revision_objections(
+                self.objections,regex_withheld,self.grounded_objection_verdicts,
+                require_grounded=is_vrf_definition_question(question)))
+        self.events.record("objections_unjudged_before_revision",
+            ids=[o["id"] for o in unjudged_before_revision],
+            retained_in_audit=True)
         for o in revision_objections:
             try:
                 self.moderator.submit(Message("review:"+o.id,o.claim_id,
@@ -1850,6 +1887,7 @@ class FullCouncilRunner(CouncilRunner):
         result={"research_result":brief.to_dict(),"proposals":proposals,
             "objections":[asdict(o) for o in self.objections],
             "objections_withheld_from_revision":withheld,
+            "objections_unjudged_before_revision":unjudged_before_revision,
             "author_responses":[asdict(a) for a in self.author_responses],
             "claims":[asdict(c) for c in self.ledger.claims.values()],
             "evidence":[asdict(e) for e in self.ledger.evidence.values()],
