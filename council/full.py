@@ -1228,6 +1228,7 @@ class FullCouncilRunner(CouncilRunner):
             if len(proposals)<2 or self.budget.debate_remaining()<=1:break
             peer=proposals[(i+1)%len(proposals)]["family"]
             if peer==p["family"]:continue
+            p["reviewer_family"]=peer  # Recheck by the actual original critic.
             review=await self._call(
                 peer,"review",self._review_payload(question,p))
             if not review:continue
@@ -1316,14 +1317,16 @@ class FullCouncilRunner(CouncilRunner):
         for p in proposals:
             if "revised_approach" not in p or self.budget.debate_remaining()<3:
                 continue
-            reviewer=next((f for f in self.solvers if f!=p["family"]),None)
+            reviewer=p.get("reviewer_family")
             if not reviewer:
                 continue
             followup=await self._call(
                 reviewer,"review",self._review_payload(question,p,recheck=True))
             if followup:
                 try:
-                    for raw_ob in item_list(followup,"objections")[:4]:
+                    # Follow-up is a targeted recheck, not four more
+                    # independent criticisms of the original submission.
+                    for raw_ob in item_list(followup,"objections")[:2]:
                         claimed=require_string(raw_ob,"claim_id")
                         cid=p["claim_map"].get(claimed,claimed)
                         if cid not in p["claim_ids"]:continue
@@ -1383,10 +1386,12 @@ class FullCouncilRunner(CouncilRunner):
                          for cid in self.moderator.priority_order()
                          if self.ledger.claims[cid].status in
                          {ClaimStatus.PROPOSED,ClaimStatus.UNRESOLVED}]
-            jobs = [(claim, hunter, self.moderator.current_round)
-                    for claim in open_claims[:self.hunter_cap]
-                    if (hunter := next((f for f in self.solvers
-                                        if f != claim.owner_family), None))]
+            jobs=[]
+            for idx,claim in enumerate(open_claims[:self.hunter_cap]):
+                alternatives=[f for f in self.solvers if f!=claim.owner_family]
+                if alternatives:
+                    hunter=alternatives[idx%len(alternatives)]
+                    jobs.append((claim,hunter,self.moderator.current_round))
             await self._hunt_batch(jobs)
             for claim in open_claims[:self.hunter_cap]:
                 if self.budget.debate_remaining() < 1:
