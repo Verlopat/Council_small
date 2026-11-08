@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# Reproducible, resumable VRF quick/full comparison. Uses LOCAL provider keys.
+# Run at repository root: bash scripts/benchmark_vrf_modes.sh
+set -euo pipefail
+
+if [[ ! -f runs/papers.sqlite3 ]]; then
+  echo "Missing runs/papers.sqlite3. Index RFC 9381 before benchmarking." >&2
+  exit 2
+fi
+
+COUNT="${COUNT:-5}"
+if ! [[ "$COUNT" =~ ^[1-9][0-9]*$ ]] || (( COUNT > 100 )); then
+  echo "COUNT must be an integer between 1 and 100" >&2
+  exit 2
+fi
+
+QUESTION='Explain full uniqueness, trusted uniqueness, and pseudorandomness security games for a lattice-based VRF.'
+mkdir -p runs
+
+for ((i=1; i<=COUNT; ++i)); do
+  for mode in quick full; do
+    target="runs/${mode}_${i}.json"
+    if [[ -f "$target" ]]; then
+      if python -m json.tool "$target" > /dev/null 2>&1; then
+        echo "Preserving existing $target"
+        continue
+      fi
+      echo "Existing $target is invalid JSON; move it aside before retrying." >&2
+      exit 1
+    fi
+    tmp="${target}.partial"
+    deadline=240
+    [[ "$mode" == "full" ]] && deadline=1200
+    echo "Running $mode sample $i/$COUNT (provider quotas and deadlines apply)"
+    if ! python -m council.cli \
+        --mode "$mode" --deadline "$deadline" --timeout 60 \
+        --paper-index runs/papers.sqlite3 --json "$QUESTION" \
+        > "$tmp" 2> "runs/${mode}_${i}.stderr.log"; then
+      echo "Run failed; inspect $tmp and runs/${mode}_${i}.stderr.log" >&2
+      exit 1
+    fi
+    if ! python -m json.tool "$tmp" > /dev/null; then
+      echo "Invalid JSON output for $mode sample $i; preserved $tmp" >&2
+      exit 1
+    fi
+    mv "$tmp" "$target"
+  done
+done
+
+python -m eval.compare_vrf_modes --input-dir runs --count "$COUNT" \
+  --scores runs/vrf_human_scores.csv
+echo "Fill the correctness column in runs/vrf_human_scores.csv, then rerun"
+echo "python -m eval.compare_vrf_modes --input-dir runs --count $COUNT --scores runs/vrf_human_scores.csv"
