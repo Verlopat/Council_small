@@ -33,7 +33,7 @@ from council.verify.ladder import verify
 from council.compose import compose_answer
 from council.workflow import CouncilRunner
 from council.requirements import Requirements
-from council.vrf_sanity import scan_vrf_games
+from council.vrf_sanity import scan_vrf_games, unsupported_full_sk_secrecy
 from council.vrf_audit import (scan_audit_issues, objection_conflicts,
                                objection_scope_noise)
 from council.objection_sections import presentation_sections
@@ -1002,6 +1002,15 @@ class FullCouncilRunner(CouncilRunner):
     def _apply_revised_claim(self, p: dict, cid: str, changed: str,
                              item: dict) -> None:
         """Attach only new [R#] source provenance; old evidence never follows."""
+        question=(self.requirements.objective
+                  if self.requirements else self._current_question)
+        if (is_vrf_definition_question(question) and
+                unsupported_full_sk_secrecy(changed)):
+            self.events.record("unsafe_revision_rejected",claim_id=cid,
+                reason="full_uniqueness_sk_secrecy_restriction")
+            self.warnings.append(cid+": revision rejected because full "
+                "uniqueness cannot forbid the adversary knowing/using SK")
+            return
         revised=self.ledger.revise(cid,changed)
         revised.source_span=None  # never inherit the old anchor
         revised.anchor_method=None
@@ -1508,6 +1517,14 @@ class FullCouncilRunner(CouncilRunner):
                 continue
             new_text=suggestion["revised_statement"].strip()
             if not new_text or new_text==c.statement:continue
+            if (is_vrf_definition_question(question) and
+                    unsupported_full_sk_secrecy(new_text)):
+                self.events.record("unsafe_repair_rejected",claim_id=c.id,
+                    repairer=repairer,
+                    reason="full_uniqueness_sk_secrecy_restriction")
+                self.warnings.append(c.id+": repair rejected because "
+                    "full uniqueness does not require SK secrecy")
+                continue
             closed_cause = self.moderator.bus.stalemates().get(c.id)
             if closed_cause in {"no_evidence_possible", "agents_gave_up"}:
                 if not self.moderator.authorize_repair_from_stalemate(c.id,repairer):
