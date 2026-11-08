@@ -150,7 +150,7 @@ def objection_conflicts(question: str, ident: str, issue: str,
         r"\b(?:should|must)\b.{0,75}\b(?:producing|finding)\b"
         r".{0,30}\b(?:a\s+)?collision\b|"
         r"\bnot\s+by\s+producing\s+(?:two\s+)?distinct\s+outputs\b|"
-        r"\binverted\s+win\s+condition\b.{0,120}\bcollision\b",
+        r"\binverted\s+win\s+condition\b.{0,260}\bcollision\b",
         t,re.I))
     if unique and collision_win and not quoted_error:
         add("contradicts_rfc_3_1_uniqueness_is_not_collision",
