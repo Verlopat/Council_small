@@ -50,6 +50,28 @@ def describes_game(statement: str) -> bool:
         r"verif\w*|keygen)\b",t,re.I))
 
 
+def oracle_randomized(text: str) -> bool:
+    """Flag randomising ordinary oracle replies, not the target challenge.
+
+    Keep the scope inside the oracle's own clause. An adjacent challenger
+    returning the *challenge* at random must not trigger this warning.
+    """
+    for match in re.finditer(
+            r"\b(?:evaluation\s+)?oracle\b|\boracle\s+responses?\b",
+            text,re.I):
+        clause=re.split(r"[.;\n]",text[match.end():],maxsplit=1)[0][:180]
+        # A subsequent challenger action is a different semantic subject.
+        clause=re.split(r"\bchallenger\b|\bchallenge\s+(?:value|output)\b",
+                        clause,maxsplit=1,flags=re.I)[0]
+        if re.search(r"\b(?:random|uniform|simulat\w*)\b",clause,re.I) and (
+                re.search(r"\b(?:returns?|responds?|answers?|outputs?|samples?)\b",
+                          clause,re.I)
+                or re.search(r"\b(?:every|each|all|ordinary)\b.{0,75}"
+                              r"\b(?:queries|responses?)\b",clause,re.I)):
+            return True
+    return False
+
+
 def scan_vrf_games(question: str, claims) -> list[dict]:
     if not VRF.search(question):
         return []
@@ -252,11 +274,7 @@ def scan_vrf_games(question: str, claims) -> list[dict]:
                               "run locally. A special verification oracle is "
                               "unnecessary and may signal a mis-specified game.",
                     "reference":"RFC 9381 Sections 2 and 3.4"})
-            if (re.search(r"\b(?:evaluation\s+)?oracle\b.{0,100}"
-                          r"\b(?:returns?|responds?|answers?|replies?|outputs?)\b"
-                          r".{0,65}\b(?:random|simulat\w*)\b",text,re.I)
-                    or re.search(r"\b(?:oracle\s+responses?|ordinary\s+queries)\b"
-                                 r".{0,90}\b(?:random|simulat\w*)\b",text,re.I)):
+            if oracle_randomized(text):
                 findings.append({
                     "claim_id":cid,"kind":"oracle_distribution_conflation",
                     "message":"Ordinary VRF evaluation oracle outputs must "
@@ -346,9 +364,9 @@ def scan_vrf_games(question: str, claims) -> list[dict]:
                 })
             # The challenge bit is not supposed to replace the *entire*
             # evaluation oracle with random values and simulated proofs.
-            if (re.search(r"\b(?:all|every|each)\b.{0,55}\b(?:quer(?:y|ies)|"
-                          r"oracle responses?)\b", text, re.I)
-                    and re.search(r"\b(?:random|uniform)\b.{0,75}\bproof", text, re.I)):
+            if (oracle_randomized(text) and
+                    re.search(r"\b(?:random|uniform|simulat\w*)\b.{0,75}"
+                              r"\bproof",text,re.I)):
                 findings.append({
                     "claim_id": cid,
                     "kind": "oracle_distribution_conflation",
@@ -374,7 +392,15 @@ def scan_vrf_games(question: str, claims) -> list[dict]:
                     "reference":"RFC 9381 Section 3.4"})
             if not re.search(r"\bevaluation\s+oracle\b|\boracle\b|"
                              r"\bquer(?:y|ies)\b.{0,100}\bproof\b|"
-                             r"\bproof\b.{0,100}\bother\s+inputs?\b",text,re.I):
+                             r"\bproof\b.{0,100}\bother\s+inputs?\b|"
+                             r"\b(?:obtain\w*|receive\w*|return\w*)\b"
+                             r".{0,70}\(\s*(?:β|beta|y)[^,)]{0,15},\s*"
+                             r"(?:π|pi)[^)]{0,15}\)\s*(?:pairs?)?|"
+                             r"\(\s*(?:β|beta|y)[^,)]{0,15},\s*"
+                             r"(?:π|pi)[^)]{0,15}\)\s*(?:pairs?)?\s+"
+                             r"\bfor\s+(?:any|other|chosen)\b|"
+                             r"\b(?:output.?proof|output\s+and\s+proof)\s+pairs?\b",
+                             text,re.I):
                 findings.append({
                     "claim_id":cid,"kind":"pseudorandomness_oracle_unspecified",
                     "message":"No evaluation oracle giving real output-proof "
