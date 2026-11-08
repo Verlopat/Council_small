@@ -23,6 +23,33 @@ ADV_KEY = re.compile(
     re.I)
 
 
+def game_topic(statement: str) -> str | None:
+    """Most-specific named security-game topic; trusted outranks full."""
+    t=topic_text(statement)
+    if "trusted uniqueness" in t:
+        return "trusted"
+    if "full uniqueness" in t:
+        return "full"
+    if "pseudorandom" in t:
+        return "pseudo"
+    return None
+
+
+def describes_game(statement: str) -> bool:
+    """Skip cryptographic-assumption conjectures and model-only research claims."""
+    t=topic_text(statement)
+    if game_topic(t) is None:
+        return False
+    if re.search(r"\b(?:reduc(?:es?|ed|tion)|assumptions?|hardness|"
+                 r"\bsis\b|\blwe\b|random\s+oracle\s+model)\b",t,re.I):
+        return False
+    return bool(re.search(
+        r"\b(?:adversary|challenger|oracle|wins?|game|choos\w*|"
+        r"receiv\w*|produces?|outputs?|proofs?|"
+        r"requires?|forbids?|breaks?|broken|assumes?|"
+        r"verif\w*|keygen)\b",t,re.I))
+
+
 def scan_vrf_games(question: str, claims) -> list[dict]:
     if not VRF.search(question):
         return []
@@ -33,10 +60,16 @@ def scan_vrf_games(question: str, claims) -> list[dict]:
         if not isinstance(statement, str) or not isinstance(cid, str):
             continue
         text = topic_text(statement)
+        if not describes_game(text):
+            continue
+        topic=game_topic(text)
+        full_here=(topic=="full")
+        trusted_here=(topic=="trusted")
+        pseudo_here=(topic=="pseudo")
         # RFC 9381 3.1 vs 3.2: uniqueness fixes ONE input and prohibits
         # DIFFERENT outputs. A claim about different inputs with ONE output
         # is collision resistance, regardless of whether it sounds plausible.
-        is_unique = FULL.search(text) or TRUSTED.search(text)
+        is_unique = full_here or trusted_here
         if is_unique:
             different_inputs = re.search(
                 r"\b(?:two|2)\s+(?:distinct|different)\s+(?:VRF\s+)?inputs?\b"
@@ -77,7 +110,7 @@ def scan_vrf_games(question: str, claims) -> list[dict]:
                           "trapdoor or key to verify outputs; inspect the "
                           "verifier interface.",
                 "reference":"RFC 9381 Section 2"})
-        if PSEUDO.search(text) and re.search(
+        if pseudo_here and re.search(
                 r"\brandom\s+(?:challenge\s+)?(?:point|input)\b",
                 text,re.I) and not re.search(
                 r"\badversar(?:y|ial)\b.{0,85}"
@@ -115,7 +148,7 @@ def scan_vrf_games(question: str, claims) -> list[dict]:
                           "condition, not VRF uniqueness, which fixes one "
                           "input and rules out two accepted outputs.",
                 "reference":"RFC 9381 Sections 3.1–3.3"})
-        if FULL.search(text) and re.search(
+        if full_here and re.search(
                 r"\b(?:honest|honestly generated|trusted)\s+"
                 r"(?:public\s+)?key\b",text,re.I) and not ADV_KEY.search(text) and not re.search(
                 r"\b(?:malicious|adversarial|arbitrary)\s+"
@@ -127,7 +160,7 @@ def scan_vrf_games(question: str, claims) -> list[dict]:
                           "public keys. Full uniqueness must include "
                           "adversarially selected public keys.",
                 "reference":"RFC 9381 Section 3.1"})
-        if TRUSTED.search(text) and re.search(
+        if trusted_here and re.search(
                 r"\b(?:malicious|adversarial)\s+key\s+generation\b",text,re.I):
             findings.append({
                 "claim_id":cid,
@@ -150,7 +183,7 @@ def scan_vrf_games(question: str, claims) -> list[dict]:
                               "outputs for one fixed input; the fresh target "
                               "challenge belongs to pseudorandomness.",
                     "reference":"RFC 9381 Sections 3.1, 3.3 and 3.4"})
-        if TRUSTED.search(text) and re.search(
+        if trusted_here and re.search(
                 r"\b(?:game|requires?|restricts?|assumes?|prohibits?|ensures?)\b",
                 text,re.I) and not re.search(
                 r"\b(?:secret\s+key|private\s+key|SK|trapdoor)\b",text,re.I):
@@ -193,7 +226,7 @@ def scan_vrf_games(question: str, claims) -> list[dict]:
                               "DIFFERENT OUTPUT VALUES that both verify "
                               "for the same public key and input.",
                     "reference":"RFC 9381 Sections 3.1 and 3.3"})
-        if TRUSTED.search(text) and re.search(
+        if trusted_here and re.search(
                 r"\bnever\s+(?:obtains?|learns?|gets?|receives?)\b.{0,45}"
                 r"(?:secret\s+key|\bsk\b)|"
                 r"\b(?:cannot|can\s+not|forbid\w*|prevent\w*)\b.{0,85}"
@@ -211,7 +244,7 @@ def scan_vrf_games(question: str, claims) -> list[dict]:
                           "hold even if the adversary knows the honestly "
                           "generated secret key.",
                 "reference":"RFC 9381 Section 3.3"})
-        if PSEUDO.search(text):
+        if pseudo_here:
             if re.search(r"\bverification\s+oracle\b",text,re.I):
                 findings.append({
                     "claim_id":cid,"kind":"prf_verification_oracle",
@@ -219,12 +252,11 @@ def scan_vrf_games(question: str, claims) -> list[dict]:
                               "run locally. A special verification oracle is "
                               "unnecessary and may signal a mis-specified game.",
                     "reference":"RFC 9381 Sections 2 and 3.4"})
-            if (re.search(r"\boracle\b.{0,180}"
-                          r"(?:either|depending\s+on|if\s+b\s*=).{0,140}"
-                          r"(?:random|simulat|real\s+vrf)",text,re.I) or
-                re.search(r"\boracle\b.{0,150}"
-                          r"(?:random|simulat).{0,100}"
-                          r"(?:hidden\s+bit|depending|b\s*=)",text,re.I)):
+            if (re.search(r"\b(?:evaluation\s+)?oracle\b.{0,100}"
+                          r"\b(?:returns?|responds?|answers?|replies?|outputs?)\b"
+                          r".{0,65}\b(?:random|simulat\w*)\b",text,re.I)
+                    or re.search(r"\b(?:oracle\s+responses?|ordinary\s+queries)\b"
+                                 r".{0,90}\b(?:random|simulat\w*)\b",text,re.I)):
                 findings.append({
                     "claim_id":cid,"kind":"oracle_distribution_conflation",
                     "message":"Ordinary VRF evaluation oracle outputs must "
@@ -234,7 +266,7 @@ def scan_vrf_games(question: str, claims) -> list[dict]:
         # The game type can be valid even if the model uses signature
         # terminology; flag the ambiguity rather than silently equating APIs.
         if re.search(r"\bsigning\s+oracle\b",text,re.I) and (
-                FULL.search(text) or TRUSTED.search(text) or PSEUDO.search(text)):
+                full_here or trusted_here or pseudo_here):
             findings.append({
                 "claim_id":cid,"kind":"vrf_signing_oracle_terminology",
                 "message":"The game specifies a signing oracle. Distinguish "
@@ -242,7 +274,7 @@ def scan_vrf_games(question: str, claims) -> list[dict]:
                           "signature oracle; uniqueness does not need an "
                           "oracle to define its two-output win condition.",
                 "reference":"RFC 9381 Sections 3.1–3.4"})
-        if TRUSTED.search(text) and re.search(
+        if trusted_here and re.search(
                 r"\b(?:different|other)\s+(?:identit(?:y|ies)|"
                 r"instances?|secret\s+keys?|keys?)\b|"
                 r"\b(?:some|other)\s+keys?\s+but\s+not\s+"
@@ -254,7 +286,7 @@ def scan_vrf_games(question: str, claims) -> list[dict]:
                           "secret key. Knowledge of other identities' keys "
                           "is not the defining experiment.",
                 "reference":"RFC 9381 Section 3.3"})
-        if FULL.search(text) and re.search(
+        if full_here and re.search(
                 r"\b(?:all|these|above)\s+(?:games|definitions)\b.{0,110}"
                 r"\bhonest[- ]key\b|"
                 r"\bfull\s+uniqueness\b.{0,180}"
@@ -266,7 +298,7 @@ def scan_vrf_games(question: str, claims) -> list[dict]:
                           "public keys; describing all games as honest-key "
                           "games contradicts this condition.",
                 "reference":"RFC 9381 Section 3.1"})
-        if TRUSTED.search(text) and re.search(
+        if trusted_here and re.search(
                 r"\bnever\s+(?:leaked|exposed|revealed|disclosed)\b|"
                 r"\b(?:kept|remains?)\s+secret\b|"
                 r"\bwithout\s+(?:access\s+to\s+|knowledge\s+of\s+|the\s+)"
@@ -291,7 +323,7 @@ def scan_vrf_games(question: str, claims) -> list[dict]:
                           "assuming the verifier knows or trusts a secret "
                           "key. Check the intended key quantifier.",
                 "reference":"RFC 9381 Section 3.1"})
-        if PSEUDO.search(text):
+        if pseudo_here:
             # A challenger should not disclose a valid proof for the
             # pseudorandomness challenge. Flag only affirmative descriptions,
             # not cautions warning that a proof must NOT be returned.
@@ -331,7 +363,7 @@ def scan_vrf_games(question: str, claims) -> list[dict]:
             text,re.I)) and not bool(re.search(
             r"\badvantage\b.{0,150}(?:pr\s*\[|probability)",
             text,re.I)))
-        if PSEUDO.search(text) and describes_game:
+        if pseudo_here and describes_game:
             if (re.search(r"\bPRF\s+(?:output\s+)?distribution\b",text,re.I)
                     and not re.search(r"\buniform(?:ly)?\s+random\b",text,re.I)):
                 findings.append({
@@ -349,7 +381,8 @@ def scan_vrf_games(question: str, claims) -> list[dict]:
                               "pairs for other inputs appears in this claim. "
                               "Check the complete game.",
                     "reference":"RFC 9381 Section 3.4"})
-            if not re.search(r"\bunqueried\b|\bfresh\b|"
+            if not (re.search(r"\bselective\s+pseudorandom",text,re.I)
+                    and not re.search(r"\bfull\s+pseudorandom",text,re.I)) and not re.search(r"\bunqueried\b|\bfresh\b|"
                              r"\b(?:not|never)\s+quer(?:y|ied)\b|"
                              r"\bforbid.{0,45}quer|\bother\s+inputs?\b|"
                              r"\bexcept\s+(?:the\s+)?challeng",text,re.I):
@@ -359,7 +392,7 @@ def scan_vrf_games(question: str, claims) -> list[dict]:
                               "on asking its evaluation/proof oracle are not "
                               "specified in this claim.",
                     "reference":"RFC 9381 Section 3.4"})
-        if FULL.search(text) and re.search(r"\bgame\b",text,re.I):
+        if full_here and re.search(r"\bgame\b",text,re.I):
             if not ADV_KEY.search(text) and not re.search(r"adversar(?:y|ial).{0,85}"
                              r"(?:choos|select|generat|suppl).{0,50}"
                              r"(?:key|PK|public)\b|"
@@ -384,7 +417,7 @@ def scan_vrf_games(question: str, claims) -> list[dict]:
                               "two different accepting outputs for one input "
                               "and adversarially selected public key.",
                     "reference":"RFC 9381 Section 3.1"})
-        if FULL.search(text):
+        if full_here:
             if (re.search(r"challenger.{0,110}(?:key\s*gen(?:eration)?|"
                           r"keygen|generates?\s+(?:a\s+)?key\s*pair)", text, re.I)
                     and not ADV_KEY.search(text)
@@ -399,7 +432,7 @@ def scan_vrf_games(question: str, claims) -> list[dict]:
                                "challenger key generation is the trusted-key "
                                "variant. Review key-generation quantifiers.",
                 })
-        if TRUSTED.search(text) and re.search(r"\bgame\b",text,re.I):
+        if trusted_here and re.search(r"\bgame\b",text,re.I):
             if not re.search(r"\bhonest(?:ly)?\b|\bkeygen\b|"
                              r"\bkey\s+gen(?:eration)?\b|"
                              r"\bproper(?:ly)?\s+generated\b",text,re.I):
@@ -417,7 +450,7 @@ def scan_vrf_games(question: str, claims) -> list[dict]:
                               "condition without independently specifying "
                               "two different accepting outputs for one input.",
                     "reference":"RFC 9381 Section 3.3"})
-        if TRUSTED.search(text) and re.search(r"trapdoor\s+oracle", text, re.I):
+        if trusted_here and re.search(r"trapdoor\s+oracle", text, re.I):
             findings.append({
                 "claim_id": cid,
                 "kind": "trusted_uniqueness_trapdoor_oracle",
