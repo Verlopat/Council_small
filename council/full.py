@@ -844,12 +844,19 @@ class FullCouncilRunner(CouncilRunner):
             requirements=req.as_data(),role_assignment=asdict(self.assignment),
             debate_caps=self.caps, solver_strategies=self.solver_strategies,
             deadline_remaining=self.budget.remaining())
+        # Reference is public and identical for every sealed, independent
+        # proposal. Never include a truncated or unauthenticated RFC excerpt.
+        rfc_refs=self._rfc_game_references(question)
+        self.events.record("solver_rfc_references",
+            sections=sorted(rfc_refs),
+            missing_sections=[s for s in ("3.1","3.3","3.4") if s not in rfc_refs])
         proposals=[]
         raw=await asyncio.gather(*[
             self._call(family,"proposal",{
                 "question":question,"requirements":req.as_data(),
                 "independent":True,"source_spans_required":True,
-                "strategy":self.solver_strategies[family]})
+                "strategy":self.solver_strategies[family],
+                "reference_sections":rfc_refs})
             for family in self.solvers])
         for index,(family,body) in enumerate(zip(self.solvers,raw),1):
             if body is None:continue
@@ -1017,7 +1024,8 @@ class FullCouncilRunner(CouncilRunner):
                 sample=await self._call(p["family"],"proposal",{
                     "question":question,"requirements":req.as_data(),
                     "strategy":self.solver_strategies[p["family"]],
-                    "independent":True,"source_spans_required":True})
+                    "independent":True,"source_spans_required":True,
+                    "reference_sections":rfc_refs})
                 if sample:
                     p["stability"]=("stable" if sample.get("approach")==p["approach"]
                                     else "unstable")
