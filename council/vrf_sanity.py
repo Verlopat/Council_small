@@ -358,12 +358,12 @@ def scan_vrf_games(question: str, claims) -> list[dict]:
                 })
         # Advantage formulas are not stand-alone game interfaces; do not
         # flag missing oracle/freshness merely because a formula says 'game'.
-        describes_game=(bool(re.search(
+        describes_pseudo_game=(bool(re.search(
             r"\b(?:challeng(?:e|er)|oracle|quer(?:y|ied|ies)|game)\b",
             text,re.I)) and not bool(re.search(
             r"\badvantage\b.{0,150}(?:pr\s*\[|probability)",
             text,re.I)))
-        if pseudo_here and describes_game:
+        if pseudo_here and describes_pseudo_game:
             if (re.search(r"\bPRF\s+(?:output\s+)?distribution\b",text,re.I)
                     and not re.search(r"\buniform(?:ly)?\s+random\b",text,re.I)):
                 findings.append({
