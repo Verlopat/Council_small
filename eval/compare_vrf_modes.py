@@ -12,10 +12,37 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import re
+import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 GAMES=("full_uniqueness","trusted_uniqueness","pseudorandomness")
 FIELDS=("mode","run","game","correctness","notes")
+
+
+def recorded_provider_attempts(folder: Path, run_id: object) -> int | None:
+    """Count started requests + scheduled retries in a local run database.
+
+    An attempt count includes recorded retries and provider failures, unlike
+    actual_models, which reflects completed model responses. It is NOT a
+    charged-token or provider-billing measurement.
+    """
+    if (not isinstance(run_id,str) or
+            not re.fullmatch(r"[A-Za-z0-9_-]{1,64}",run_id)):
+        return None
+    path=folder/(run_id+".sqlite3")
+    if not path.is_file():
+        return None
+    try:
+        with closing(sqlite3.connect(
+                "file:"+str(path.resolve())+"?mode=ro",uri=True)) as conn:
+            row=conn.execute(
+                "SELECT COUNT(*) FROM events WHERE event_type IN "
+                "('model_call_started','model_call_retry')").fetchone()
+            return int(row[0]) if row else 0
+    except sqlite3.Error:
+        return None
 
 
 def load_runs(folder: Path, count: int) -> list[dict]:
@@ -25,7 +52,8 @@ def load_runs(folder: Path, count: int) -> list[dict]:
             path=folder/f"{mode}_{index}.json"
             if not path.is_file():
                 rows.append({"mode":mode,"run":index,"found":False,
-                             "status":"missing","calls":0,"proposals":0,
+                             "status":"missing","calls":0,"attempts":None,
+                             "proposals":0,
                              "selected":{g:None for g in GAMES}})
                 continue
             payload=json.loads(path.read_text(encoding="utf-8"))
@@ -37,6 +65,8 @@ def load_runs(folder: Path, count: int) -> list[dict]:
                          "status":payload.get("research_result",{}).get(
                              "completion_status","unknown"),
                          "calls":len(payload.get("actual_models") or []),
+                         "attempts":recorded_provider_attempts(
+                             folder,payload.get("run_id")),
                          "proposals":len(payload.get("proposals") or []),
                          "selected":selected})
     return rows
@@ -74,20 +104,29 @@ def ensure_scores(path:Path, runs:list[dict]) -> dict[tuple[str,int,str],float]:
 
 
 def print_report(runs:list[dict],scores:dict) -> None:
-    print("Mode     Runs  Proposals  Model calls  Advisory picks  Human game ratings")
+    print("Mode     Runs  Proposals  Responses  Logged attempts  Advisory picks  Human game ratings")
     for mode in ("quick","full"):
         entries=[r for r in runs if r["mode"]==mode and r["found"]]
         n=len(entries)
         calls=sum(x["calls"] for x in entries)
+        attempts=[x["attempts"] for x in entries if x.get("attempts") is not None]
+        attempt_label=(str(sum(attempts))+
+                       ("" if len(attempts)==n else
+                        f" ({len(attempts)}/{n} logged)"))
+        if not attempts:
+            attempt_label="n/a"
         props=sum(x["proposals"] for x in entries)
         picks=sum(bool(value) for x in entries for value in x["selected"].values())
         marks=[scores[(mode,x["run"],game)]
                for x in entries for game in GAMES
                if (mode,x["run"],game) in scores]
         grade=f"{sum(marks)/len(marks):.2f} ({len(marks)} rated)" if marks else "not rated"
-        print(f"{mode:<8} {n:>4} {props:>10} {calls:>12} {picks:>14}  {grade}")
+        print(f"{mode:<8} {n:>4} {props:>10} {calls:>10} "
+              f"{attempt_label:>16} {picks:>14}  {grade}")
     print("\nAdvisory picks measure model selection, NOT security-game correctness.")
     print("Human game correctness is shown only for nonblank manual annotations.")
+    print("Responses omit provider failures; logged attempts include started "
+          "requests and scheduled retries but are not billable-token measurements.")
     missing=[f"{r['mode']}_{r['run']}" for r in runs if not r["found"]]
     if missing:
         print("Missing JSON files: "+", ".join(missing))
