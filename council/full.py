@@ -999,6 +999,22 @@ class FullCouncilRunner(CouncilRunner):
                 eligible.append(o)
         return withheld,eligible,pending
 
+    @staticmethod
+    def _audit_objection_candidates(
+            issues: list[str], ledger: ClaimLedger,
+            auditor_family: str | None) -> list[Objection]:
+        """Ground each audit issue with at least one cited, existing claim."""
+        result=[]
+        for idx,issue in enumerate(issues,1):
+            candidate_ids=re.findall(
+                r"\bp[0-9]+:(?:c|r)[0-9]+(?::repair)?\b",issue)
+            cid=next((key for key in candidate_ids
+                      if key in ledger.claims),None)
+            if cid:
+                result.append(Objection("audit:"+str(idx),"audit",cid,
+                                        auditor_family or "audit",issue,"",""))
+        return result
+
     def _apply_revised_claim(self, p: dict, cid: str, changed: str,
                              item: dict) -> None:
         """Attach only new [R#] source provenance; old evidence never follows."""
@@ -1821,16 +1837,8 @@ class FullCouncilRunner(CouncilRunner):
         # Audit criticisms also require independent RFC/claim quote checks.
         # The auditor cannot make an invalid game objection "true" by
         # merely listing it in its JSON. No calls are made without budget.
-        audit_objections=[]
-        for idx,issue in enumerate(issues,1):
-            candidate_ids=re.findall(
-                r"\bp[0-9]+:(?:c|r)[0-9]+(?::repair)?\b",issue)
-            cid=next((key for key in candidate_ids
-                      if key in self.ledger.claims),None)
-            if cid:
-                audit_objections.append(Objection(
-                    "audit:"+str(idx),"audit",cid,
-                    self.auditor_family or "audit",issue,"",""))
+        audit_objections=self._audit_objection_candidates(
+            issues,self.ledger,self.auditor_family)
         audit_grounded=(await self._ground_objections(rfc_refs,audit_objections)
                        if audit_objections else {})
         self.grounded_objection_verdicts.update(audit_grounded)
