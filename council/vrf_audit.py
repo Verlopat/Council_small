@@ -133,6 +133,55 @@ def objection_conflicts(question: str, ident: str, issue: str,
                 "Knowledge or ordinary use of an honestly generated SK does "
                 "not by itself violate trusted uniqueness; a win requires "
                 "two different accepting outputs for the SAME input.")
+    unique=bool(re.search(r"\b(?:full|trusted)\s+uniqueness\b",t,re.I)
+                or topic in {"1_full_uniqueness","2_trusted_uniqueness"})
+    # RFC 9381 §3.1/3.3: two DIFFERENT outputs on ONE common input
+    # break uniqueness. "Two inputs / same output" belongs to §3.2.
+    # Require an affirmative recommended replacement of the win condition;
+    # merely quoting the wrong definition to criticize it is not enough.
+    collision_win=bool(re.search(
+        r"\buniqueness\s+requires?\b.{0,100}"
+        r"\b(?:two|2)\s+(?:different|distinct)\s+inputs?\b"
+        r".{0,110}\b(?:same|equal|identical)\s+outputs?\b|"
+        r"\bshould\s+win\b.{0,100}\b(?:same|equal)\s+outputs?\b|"
+        r"\b(?:win|winning|wins?)\b.{0,70}\b(?:producing|finding)\b"
+        r".{0,30}\b(?:a\s+)?collision\b|"
+        r"\b(?:win|winning|wins?)\b.{0,90}\by\s*=\s*y['′]|"
+        r"\b(?:should|must)\b.{0,75}\b(?:producing|finding)\b"
+        r".{0,30}\b(?:a\s+)?collision\b|"
+        r"\bnot\s+by\s+producing\s+(?:two\s+)?distinct\s+outputs\b|"
+        r"\binverted\s+win\s+condition\b.{0,120}\bcollision\b",
+        t,re.I))
+    if unique and collision_win and not quoted_error:
+        add("contradicts_rfc_3_1_uniqueness_is_not_collision",
+            "RFC 9381 Sections 3.1, 3.2 and 3.3",
+            "Objection substitutes collision resistance (different inputs, "
+            "same output) for uniqueness (same input, different accepting "
+            "outputs). Withhold this correction from the author.")
+    # A reviewer cannot declare trusted uniqueness broken merely because
+    # the target adversary receives or uses the honestly generated SK.
+    # Knowledge of SK is part of RFC §3.3, not a second-output attack.
+    key_access=bool(re.search(
+        r"\b(?:knowledge\s+of|access\s+to|knows?|has|given|receives?|"
+        r"uses?|using|full\s+knowledge\s+of)\b.{0,60}"
+        r"\b(?:sk|secret\s+key)\b|"
+        r"\b(?:sk|secret\s+key)\b.{0,60}"
+        r"\b(?:access|knowledge|known|revealed|given)\b",t,re.I))
+    condemns_key=bool(re.search(
+        r"\b(?:trivial\w*|easily|break\w*|"
+        r"can\s+produce\s+(?:two|collisions?)|"
+        r"can\s+compute\s+.{0,50}collisions?)\b",t,re.I))
+    concealed_key=bool(re.search(
+        r"\b(?:cannot|not|must\s+not)\s+"
+        r"(?:compute|obtain|learn|know|receive)\s+"
+        r"(?:the\s+)?(?:sk|secret\s+key)\b|"
+        r"\bkeeps?\s+(?:the\s+)?secret\s+"
+        r"(?:key\s+)?hidden\b",t,re.I))
+    if trusted and (concealed_key or (key_access and condemns_key)) and not quoted_error:
+        add("contradicts_rfc_3_3_sk_known","RFC 9381 Section 3.3",
+            "The trusted-uniqueness adversary may know and use the honestly "
+            "generated SK. This alone cannot produce two different accepting "
+            "outputs for one input.")
     # For §3.4 the challenge is deliberately output-only. Detect objections
     # claiming that omission itself leaks the hidden bit. Do not flag a
     # correct objection that demands withholding the proof in both worlds.
