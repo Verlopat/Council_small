@@ -133,6 +133,25 @@ class FullCouncilRunner(CouncilRunner):
             if not ids and isinstance(raw.get("source_span"),str):
                 ids=source_sentence_ids(p["approach"],raw["source_span"])
             ids=[i for i in ids if i in section_by_sentence]
+            # Model-supplied [S#] IDs can refer to a completely different
+            # game when [S1]...[S5] share a physical line. Check the topic of
+            # the actual cited segment *before* trusting its provenance.
+            wanted=topic_of(claim.statement)
+            cited=numbered_sentence_excerpt(p["approach"],ids) if ids else None
+            if (cited and wanted in group_section and
+                    topic_of(cited) in group_section and
+                    topic_of(cited)!=wanted):
+                self.events.record("anchor_topic_mismatch",
+                    claim_id=cid,cited_ids=ids,
+                    cited_topic=topic_of(cited),claim_topic=wanted)
+                ids=[]
+            if not ids and isinstance(raw.get("source_span"),str):
+                possible=source_sentence_ids(p["approach"],raw["source_span"])
+                excerpt=numbered_sentence_excerpt(p["approach"],possible)
+                if (possible and excerpt and
+                        (wanted not in group_section or
+                         topic_of(excerpt) in {wanted,"5_other"})):
+                    ids=possible
             p["claim_sentence_ids"][cid]=ids
             scopes={section_by_sentence[i] for i in ids
                     if section_by_sentence[i] is not None}
@@ -148,7 +167,16 @@ class FullCouncilRunner(CouncilRunner):
             for source_name,source_text in sources:
                 candidates=[]
                 if isinstance(declared_span,str) and declared_span.strip():
-                    candidates.append(declared_span)
+                    # A verbatim quote can still cite the WRONG security game.
+                    quoted_topic=topic_of(declared_span)
+                    if (wanted not in group_section or
+                            quoted_topic not in group_section or
+                            quoted_topic==wanted):
+                        candidates.append(declared_span)
+                    else:
+                        self.events.record("anchor_quote_topic_mismatch",
+                            claim_id=cid,claim_topic=wanted,
+                            cited_topic=quoted_topic)
                 # The only auto-repair is a *verbatim* statement already in
                 # the original response. Never infer paraphrase equivalence.
                 if (locate_source_span(source_text, claim.statement) is not None
@@ -177,8 +205,7 @@ class FullCouncilRunner(CouncilRunner):
                 # They DO NOT establish equivalence with the model's claim.
                 # Therefore the claim remains blocked for semantic alignment,
                 # and non-definition verification cannot certify it.
-                ids=raw.get("sentence_ids")
-                original=numbered_sentence_excerpt(p["approach"],ids) if isinstance(ids,list) else None
+                original=numbered_sentence_excerpt(p["approach"],ids) if ids else None
                 if original:
                     claim.source_span=original
                     claim.assumptions=assumptions
