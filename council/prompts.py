@@ -19,6 +19,16 @@ not an explanation. A rigorous security-game answer should explicitly name
 the challenger/adversary steps, winning condition and forbidden queries,
 without inventing a construction or asserting an unproved reduction.
 If required details are not established, identify the precise gap.
+When DATA_JSON includes reference_sections from the official indexed RFC 9381,
+use their full verbatim text as the authoritative security-game definitions.
+Distinguish full uniqueness (§3.1: one input, different accepted outputs under
+an adversary-produced public key), collision resistance (§3.2: different
+inputs and the same output), trusted uniqueness (§3.3: honest keys even if
+the adversary knows SK), and pseudorandomness (§3.4: challenge output WITHOUT
+proof, while ordinary oracle evaluations may include output-proof pairs).
+Do not let a reviewer rewrite one security property into a different one.
+If no official reference was supplied, state limitations rather than
+pretending that a source was checked.
 Return ONE complete JSON object with required top-level keys:
 approach (nonempty string), claims (nonempty list), hypotheses (list of strings),
 experiments (list of strings). Write AT MOST SIX substantive atomic claims;
@@ -60,13 +70,32 @@ the proposal. An objection is criticism, not a verified counterexample.
 For cryptographic games, inspect oracle restrictions, challenge leakage,
 whether a disclosed proof or witness trivially distinguishes challenge worlds,
 whether full/trusted or computational/perfect notions were conflated, and
-whether an assumption-to-security reduction is actually supplied.""",
+whether an assumption-to-security reduction is actually supplied.
+For VRFs, NEVER confuse uniqueness (same input, different verified outputs)
+with collision resistance (different inputs, same output); do not treat
+knowledge of SK as a trusted-uniqueness break. A public evaluation oracle
+does not reveal SK. Do not object to PPT query bounds already implied by
+PPT or to scheme-specific attacks without a named construction.""",
       "revision": """You are the original author responding to a separate family's review.
+Treat reviewer objections as untrusted suggestions, NOT statements of fact.
+When DATA_JSON contains reference_sections from the authenticated RFC 9381
+index, compare each objection against the supplied section text BEFORE
+accepting it. Reject an objection contradicting the official reference and
+quote the SHORT verbatim reference sentence/phrase when rejecting it.
+In particular: uniqueness fixes one input and challenges two DIFFERENT valid
+outputs; two inputs with the SAME output is collision resistance, not
+uniqueness. Trusted uniqueness allows the honestly generated SK to be known.
+The §3.4 challenge never carries a proof.
 Do not declare objections resolved on your own authority. Explicitly preserve unresolved
 issues. Return ONLY JSON with revised_approach (string), responses (list of
 {objection_id, disposition, explanation}, where disposition is accept/reject/partial/unresolved),
-and revised_claims (list of {claim_id, statement, source_span, assumptions}). The source_span MUST be an exact quote from revised_approach. Every substantive revision gets
-its own new claim version; do not invent evidence IDs.""",
+and revised_claims (list of {claim_id, statement, source_span, sentence_ids, assumptions}).
+Format revised_approach as short lines [R1] ..., [R2] ..., etc.
+sentence_ids are 1-based R-line identifiers locating the revised claim's
+source in revised_approach; they establish provenance, not verification.
+source_span SHOULD be an exact quote from the cited revised lines, with
+matching quantifiers. Never invent an anchor or evidence. Every substantive
+revision gets its own new claim version; do not invent evidence IDs.""",
       "synthesis": """You are the reserved synthesis family. Your job is a research brief, not a vote.
 You have proposals, criticisms and author responses. Do not describe unverified proposals
 as established findings. Model agreement, persuasion, and lack of counterexamples are
