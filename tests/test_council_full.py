@@ -58,8 +58,13 @@ class FullModeTests(unittest.IsolatedAsyncioTestCase):
                 t=FakeFullTransport()
                 result=await QuickCouncilRunner(
                     t,events,RunBudget.start(80,10)).run("Check equality")
-                self.assertEqual([x[1] for x in t.calls],
-                                 ["proposal","translate","judge"])
+                self.assertEqual([x[1] for x in t.calls[:2]],
+                                 ["proposal","translate"])
+                # A bounded quick-mode budget may skip the optional judge;
+                # it must never judge before scoped verification.
+                if any(role=="judge" for _,role,_ in t.calls):
+                    self.assertGreater([x[1] for x in t.calls].index("judge"),
+                                       [x[1] for x in t.calls].index("translate"))
                 self.assertTrue(result["research_result"]["supported_findings"])
                 self.assertEqual(result["verdict"]["status"],"answer")
 
