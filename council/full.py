@@ -1002,8 +1002,9 @@ class FullCouncilRunner(CouncilRunner):
     def _apply_revised_claim(self, p: dict, cid: str, changed: str,
                              item: dict) -> None:
         """Attach only new [R#] source provenance; old evidence never follows."""
-        question=(self.requirements.objective
-                  if self.requirements else self._current_question)
+        requirements=getattr(self,"requirements",None)
+        question=(requirements.objective if requirements is not None
+                  else getattr(self,"_current_question",""))
         if (is_vrf_definition_question(question) and
                 unsupported_full_sk_secrecy(changed)):
             self.events.record("unsafe_revision_rejected",claim_id=cid,
