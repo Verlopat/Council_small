@@ -33,8 +33,13 @@ def is_plan_instead_of_answer(question: str, approach: str) -> bool:
     # Providers may write [S1], [S2], [S3] on one physical line.
     lines=[line.strip() for line in
            re.split(r"\n+|(?=\[S\d+\])", approach) if line.strip()]
-    # Do not reject one-sentence proposals or occasional legitimate
-    # imperative wording in an otherwise substantive explanation.
+    # A lone short imperative ([S1] Define all three games ...) is a
+    # disguised task list. A substantive one-line *answer* remains valid.
+    if len(lines)==1:
+        return (len(lines[0])<200 and bool(TASK_START.match(lines[0]))
+                and not bool(ANSWER_DETAIL.search(lines[0])))
+    # Do not reject occasional legitimate imperative wording in a
+    # substantive two-line explanation.
     if len(lines)<3:
         return False
     tasks=sum(bool(TASK_START.match(line)) and not ANSWER_DETAIL.search(line)
