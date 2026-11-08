@@ -95,13 +95,15 @@ def print_compact_result(result: dict, run_id: str, run_dir: Path) -> None:
         print("Evidence verdict: "+str(verdict.get("status","unresolved"))+
               (" ("+str(cause)+")" if cause else ""))
     warnings=result.get("warnings") or []
-    provider_failures=[str(item) for item in warnings
-                       if (("unavailable" in str(item).casefold()
-                            or "rate_limit" in str(item).casefold()
-                            or "timeout" in str(item).casefold())
-                           and str(item).startswith(
-                               ("proposal/","judge/","topic_judge/","audit/",
-                                "objection_judge/","translate/","repair/"))]
+    provider_failures=[]
+    for item in warnings:
+        message=str(item)
+        if (message.startswith(
+                ("proposal/","judge/","topic_judge/","audit/",
+                 "objection_judge/","translate/","repair/"))
+                and any(keyword in message.casefold()
+                        for keyword in ("unavailable","rate_limit","timeout"))):
+            provider_failures.append(message)
     if provider_failures:
         print("Provider failures: "+" | ".join(provider_failures[:2])[:380])
     pending=result.get("unjudged_objections") or []
