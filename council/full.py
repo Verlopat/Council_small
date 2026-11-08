@@ -1386,7 +1386,11 @@ class FullCouncilRunner(CouncilRunner):
                 "original_approach":p["approach"],
                 "claims":[{"id":cid,"statement":self.ledger.claims[cid].statement}
                           for cid in p["claim_ids"]],
-                "objections":[asdict(o) for o in related],
+                "objections":[dict(asdict(o),
+                    grounded_verdict="valid",
+                    reference_quote=self.grounded_objection_verdicts.get(
+                        o.id,{}).get("quote",""))
+                    for o in related],
                 "reference_sections":self._reference_for_claims(
                     p["claim_ids"],rfc_refs)})
             if not author:continue
