@@ -235,8 +235,17 @@ def objection_conflicts(question: str, ident: str, issue: str,
         r".{0,90}\b(?:adversary|it)\b.{0,50}"
         r"\b(?:can|could|would)\b.{0,50}"
         r"\b(?:distinguish\w*|trivial\w*|eas\w*)\b",t,re.I))
+    # A reviewer who notices MISSING post-challenge target-query
+    # restrictions is raising a legitimate oracle-freshness issue.
+    # Do not misread "without proof ... distinguish" as blaming the
+    # intentionally proofless challenge.
+    points_to_later_query_gap=bool(
+        re.search(r"\b(?:quer\w*|evaluation\s+oracle)\b",t,re.I)
+        and re.search(r"\b(?:after|later|post.challenge|subsequent)\b",t,re.I)
+        and re.search(r"\b(?:does\s+not|not|fails?\s+to|omit\w*|"
+                      r"unspecified|unclear|whether|allowed|permitted)\b",t,re.I))
     if pseudo and omitted and causal and (challenge_scope or direct_missing) and not (
-            says_must_omit or quoted_error):
+            says_must_omit or quoted_error or points_to_later_query_gap):
         add("contradicts_rfc_3_4_no_challenge_proof",
             "RFC 9381 Section 3.4",
             "Objection treats the deliberately omitted challenge proof as a "
