@@ -575,11 +575,18 @@ class FullCouncilRunner(CouncilRunner):
             out.append(result)
         return out
 
-    def _stop_for_independence(self,question:str,req:Requirements,
-                               proposals:list[dict])->dict:
+    async def _stop_for_independence(self, question: str, req: Requirements,
+                                      proposals: list[dict]) -> dict:
+        """Preserve a single useful answer without implying peer independence.
+
+        With exactly one valid proposal, skip expensive peer review, hunter,
+        repair and general synthesis, but do bounded RFC topic comparisons
+        and optionally one independent audit. No evidence becomes verified.
+        """
         self.events.record("run_stopped_early",
             reason="insufficient_independence",valid_solver_count=len(proposals),
-            required_solver_count=2)
+            required_solver_count=2,
+            reduced_assessment=bool(proposals))
         findings=self._vrf_findings(question,proposals)
         for c in self.ledger.claims.values():
             definition=definition_kind(question,c.statement)
@@ -588,13 +595,44 @@ class FullCouncilRunner(CouncilRunner):
                 check=consult_definition(self.paper_index,heading,section,c.id)
                 self.reference_checks.append(check)
                 self.events.record("definition_reference_checked",**check)
+        topics=[]
+        audit=None
+        audit_issues=[]
+        audit_advisories=[]
+        if proposals:
+            topics=await self._consolidate_topics(question,findings)
+            if (self.auditor_family is not None and
+                    self.budget.debate_remaining()>6):
+                # This audit is independent of the single proposer, but it
+                # cannot replace missing independent *solver* proposals.
+                audit=await self._call(self.auditor_family,"audit",{
+                    "question":question,
+                    "requirements":req.as_data(),
+                    "single_proposal":True,
+                    "research_result":{
+                        "proposed_approach":proposals[0]["approach"],
+                        "claims":[{"id":c.id,"statement":c.statement,
+                                   "source_span":c.source_span}
+                                  for c in self.ledger.claims.values()]},
+                    "reference_sections":self._rfc_game_references(question)
+                },synthesis=True)
+            if audit:
+                try:
+                    audit_issues=string_list(audit,"issues")
+                    audit_advisories=scan_audit_issues(question,audit_issues)
+                except OutputError:
+                    self.warnings.append("Single-proposal audit returned malformed issues")
         brief=ResearchResult(research_question=question,
-                             completion_status="unresolved")
-        brief.proposed_approach=(
-            "\n\n".join("Proposal "+p["id"]+" ("+p["family"]+"):\n"+
-                          p["approach"] for p in proposals))
+                             completion_status=("partial_single_proposal"
+                                                if proposals else "unresolved"))
+        brief.proposed_approach="\n\n".join(
+            "Proposal "+p["id"]+" ("+p["family"]+"):\n"+
+            p["approach"] for p in proposals)
         brief.hypotheses=list(dict.fromkeys(h for p in proposals
                                           for h in p["hypotheses"]))
+        brief.unresolved_objections=[
+            "audit:"+str(i)+": "+issue+" (advisory; not independently verified)"
+            for i,issue in enumerate(audit_issues,1)]
         brief.proof_obligations=group_by_claim_id(
             self.extra_obligations+
             [c.id+": "+c.statement+" (not independently established)"
@@ -603,12 +641,17 @@ class FullCouncilRunner(CouncilRunner):
             "Insufficient independent proposals: "+str(len(proposals))+
             "/"+str(len(self.solvers))+" configured solver families returned "
             "valid structured proposals",
-            "Review, repair, model judgment and auditor calls skipped to avoid "
-            "expensive single-proposal full-mode execution"]
+            "Single-proposal RFC alignment is an advisory comparison, not "
+            "independent solver consensus or cryptographic verification",
+            "Cross-review, author revisions, hunter and full synthesis skipped "
+            "to conserve free-tier quota"]
+        if proposals and not audit:
+            brief.limitations.append("Single-proposal independent auditor unavailable")
         brief.next_actions=self._missing_solver_actions(proposals)+[
-            "Obtain at least two independent valid proposals before full review"]
+            "Obtain at least two independent valid proposals for full peer review"]
         if findings:
-            brief.limitations.append("Advisory VRF game warnings found; not verified counterexamples")
+            brief.limitations.append(
+                "Advisory VRF game warnings found; not verified counterexamples")
         brief.limitations=list(dict.fromkeys(brief.limitations+self.warnings))
         blocking=sorted(self.ledger.claims)
         result={"research_result":brief.to_dict(),"proposals":proposals,
@@ -620,16 +663,27 @@ class FullCouncilRunner(CouncilRunner):
                        "cause":"insufficient_independence"},
             "requirements":req.as_data(),"actual_models":self.actual_models,
             "advisory_findings":findings,"reference_checks":self.reference_checks,
-            "audit_advisory_findings":[],
+            "topic_consolidation":topics,
+            "audit_advisory_findings":audit_advisories,
+            "single_proposal_audit_issues":audit_issues,
+            "rfc_conflicting_objections":[],
+            "objections_withheld_from_revision":[],
             "judge_source":"local_policy","role_coverage":{
                 "requested_solvers":list(self.solvers),
                 "valid_proposer_families":[p["family"] for p in proposals],
-                "review_objection_count":0,"independent_audit_completed":False,
+                "review_objection_count":0,
+                "independent_audit_completed":bool(audit),
                 "audit_family":self.auditor_family,
-                "stop_reason":"insufficient_independence"},
+                "stop_reason":"insufficient_independence",
+                "single_proposal_assessed":bool(proposals)},
             "warnings":self.warnings}
         if hasattr(self.events,"db") and hasattr(self.events,"run_id"):
             SQLiteLedger(self.events.db).save(self.events.run_id,self.ledger)
+        self.events.record("single_proposal_assessment_completed",
+            topic_results=len(topics),selected_games=sum(
+                bool(row.get("best_version_id")) for row in topics),
+            auditor_completed=bool(audit),
+            independent_proposals=len(proposals))
         self.events.record("run_finished",result=result)
         return result
 
@@ -985,7 +1039,7 @@ class FullCouncilRunner(CouncilRunner):
         # Keep source diagnostics, but do not spend quota on peer review,
         # revisions, repair, blind judge or final audit.
         if mode=="full" and len(proposals)<2:
-            return self._stop_for_independence(question,req,proposals)
+            return await self._stop_for_independence(question,req,proposals)
         if not proposals:
             result={"research_result":ResearchResult(question,completion_status="unresolved",
                     limitations=self.warnings).to_dict(),
