@@ -15,6 +15,14 @@ REQUEST=re.compile(
 TASK_REQUEST=re.compile(
     r"\b(?:plan|roadmap|research agenda|steps to|how (?:should|can|to) "
     r"(?:build|develop|implement|research))\b",re.I)
+# An imperative opening can still be followed by the *actual* definition.
+# Reject a checklist, not a fully specified security game whose first
+# word is e.g. "Define" or "Describe".
+ANSWER_DETAIL=re.compile(
+    r"\b(?:is\s+(?:the|a|defined)|means|requires?|ensures?|assumes?|"
+    r"the\s+adversary\s+(?:receives|chooses|produces|wins|outputs)|"
+    r"vrf_verify|beta[12]?\s*(?:!=|≠)|challenge\s+output\s+is|"
+    r"two\s+different\s+(?:valid\s+)?outputs?)\b",re.I)
 
 
 def is_plan_instead_of_answer(question: str, approach: str) -> bool:
@@ -29,5 +37,6 @@ def is_plan_instead_of_answer(question: str, approach: str) -> bool:
     # imperative wording in an otherwise substantive explanation.
     if len(lines)<3:
         return False
-    tasks=sum(bool(TASK_START.match(line)) for line in lines)
+    tasks=sum(bool(TASK_START.match(line)) and not ANSWER_DETAIL.search(line)
+              for line in lines)
     return tasks>=3 and tasks/len(lines)>=0.6
