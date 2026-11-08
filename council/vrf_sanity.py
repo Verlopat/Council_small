@@ -72,6 +72,26 @@ def oracle_randomized(text: str) -> bool:
     return False
 
 
+def unsupported_full_sk_secrecy(statement: str) -> bool:
+    """Reject adding an SK-secrecy restriction to RFC 9381 full uniqueness.
+
+    An adversary that can choose PK may know its corresponding SK. This
+    narrow rule only guards a known, harmful revision failure.
+    """
+    text=topic_text(statement)
+    return bool(game_topic(text)=="full" and re.search(
+        r"\b(?:adversar\w*\s+)?(?:cannot|can\s+not|must\s+not|may\s+not)\b"
+        r".{0,75}\b(?:use|access|know|receive|obtain)\b"
+        r".{0,55}\b(?:sk|secret\s+key)\b|"
+        r"\b(?:adversar\w*\s+)?(?:is\s+)?not\s+given\b"
+        r".{0,70}\b(?:sk|secret\s+key)\b|"
+        r"\b(?:adversar\w*\s+)?(?:has|gets|receives?)\s+no\s+access\b"
+        r".{0,55}\b(?:sk|secret\s+key)\b|"
+        r"\bwithout\s+(?:any\s+)?(?:access\s+to\s+)?"
+        r"(?:the\s+)?(?:sk|secret\s+key)\b",
+        text,re.I))
+
+
 def scan_vrf_games(question: str, claims) -> list[dict]:
     if not VRF.search(question):
         return []
@@ -88,6 +108,27 @@ def scan_vrf_games(question: str, claims) -> list[dict]:
         full_here=(topic=="full")
         trusted_here=(topic=="trusted")
         pseudo_here=(topic=="pseudo")
+        if full_here and unsupported_full_sk_secrecy(statement):
+            findings.append({
+                "claim_id":cid,
+                "kind":"full_uniqueness_invalid_sk_restriction",
+                "message":"Full uniqueness lets the adversary produce the "
+                          "public key, so it may know a corresponding secret "
+                          "key. Do not add SK secrecy or usage restrictions.",
+                "reference":"RFC 9381 Section 3.1"})
+        if pseudo_here and re.search(
+                r"\b(?:adversar\w*\b.{0,80})?"
+                r"(?:receives?|given|gets?|knows?|learns?|after\s+receiving)\b"
+                r".{0,50}\(\s*pk\s*,\s*sk\s*\)|"
+                r"\badversar\w*\b.{0,75}\b(?:given|receives?|knows?)\b"
+                r".{0,40}\b(?:sk|secret\s+key)\b",text,re.I):
+            findings.append({
+                "claim_id":cid,
+                "kind":"pseudorandomness_adversary_knows_sk",
+                "message":"The pseudorandomness challenger gives the "
+                          "adversary PK, not SK; knowledge of SK defeats "
+                          "the challenge's intended secrecy.",
+                "reference":"RFC 9381 Section 3.4"})
         # RFC 9381 3.1 vs 3.2: uniqueness fixes ONE input and prohibits
         # DIFFERENT outputs. A claim about different inputs with ONE output
         # is collision resistance, regardless of whether it sounds plausible.
