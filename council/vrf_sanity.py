@@ -12,6 +12,15 @@ VRF = re.compile(r"\bVRFs?\b|verifiable random function", re.I)
 PSEUDO = re.compile(r"pseudorandom|\bPRF\b", re.I)
 FULL = re.compile(r"\bfull\s+uniqueness", re.I)
 TRUSTED = re.compile(r"\btrusted\s+uniqueness", re.I)
+# RFC §3.1 explicitly permits the adversary to *produce/find/output* the PK.
+ADV_KEY = re.compile(
+    r"\badversar\w*.{0,65}\b(?:produc\w*|output\w*|find\w*|"
+    r"choos\w*|select\w*|generat\w*|submit\w*|suppl\w*)\b"
+    r".{0,65}\b(?:vrf\s+)?(?:public\s+key|pk)\b|"
+    r"\bno\s+adversary\s+can\s+find\s+(?:a\s+)?"
+    r"(?:vrf\s+)?public\s+key\b|"
+    r"\bfor\s+(?:any|every|all)\s+(?:vrf\s+)?public\s+keys?\b",
+    re.I)
 
 
 def scan_vrf_games(question: str, claims) -> list[dict]:
@@ -47,6 +56,14 @@ def scan_vrf_games(question: str, claims) -> list[dict]:
                               "(Sections 3.1/3.3) requires a common input "
                               "and two distinct verified outputs.",
                     "reference":"RFC 9381 Sections 3.1–3.3"})
+        if is_unique and re.search(r"\binjectiv(?:e|ity)\b",text,re.I):
+            findings.append({
+                "claim_id":cid,
+                "kind":"uniqueness_injectivity_conflation",
+                "message":"Injectivity across distinct inputs is the collision-"
+                          "resistance notion in RFC 9381 Section 3.2; uniqueness "
+                          "requires one fixed input and at most one accepted output.",
+                "reference":"RFC 9381 Sections 3.1–3.3"})
         if is_unique and re.search(
                 r"\b(?:trapdoor|secret\s+key)\b.{0,100}"
                 r"\bverif(?:y|ies|ication)\b|"
@@ -100,7 +117,7 @@ def scan_vrf_games(question: str, claims) -> list[dict]:
                 "reference":"RFC 9381 Sections 3.1–3.3"})
         if FULL.search(text) and re.search(
                 r"\b(?:honest|honestly generated|trusted)\s+"
-                r"(?:public\s+)?key\b",text,re.I) and not re.search(
+                r"(?:public\s+)?key\b",text,re.I) and not ADV_KEY.search(text) and not re.search(
                 r"\b(?:malicious|adversarial|arbitrary)\s+"
                 r"(?:public\s+)?keys?\b",text,re.I):
             findings.append({
@@ -343,7 +360,7 @@ def scan_vrf_games(question: str, claims) -> list[dict]:
                               "specified in this claim.",
                     "reference":"RFC 9381 Section 3.4"})
         if FULL.search(text) and re.search(r"\bgame\b",text,re.I):
-            if not re.search(r"adversar(?:y|ial).{0,85}"
+            if not ADV_KEY.search(text) and not re.search(r"adversar(?:y|ial).{0,85}"
                              r"(?:choos|select|generat|suppl).{0,50}"
                              r"(?:key|PK|public)\b|"
                              r"(?:PK|public\s+key).{0,40}chosen\s+by\s+"
@@ -370,6 +387,7 @@ def scan_vrf_games(question: str, claims) -> list[dict]:
         if FULL.search(text):
             if (re.search(r"challenger.{0,110}(?:key\s*gen(?:eration)?|"
                           r"keygen|generates?\s+(?:a\s+)?key\s*pair)", text, re.I)
+                    and not ADV_KEY.search(text)
                     and not re.search(r"adversar(?:y|ial).{0,60}(?:choos|generat|"
                                       r"select).{0,30}(?:pk|public key|key pair)",
                                       text, re.I)):
