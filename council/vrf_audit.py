@@ -98,9 +98,12 @@ def objection_conflicts(question: str, ident: str, issue: str,
                  or topic=="2_trusted_uniqueness")
     pseudo=bool(re.search(r"\bpseudorandom",t,re.I)
                 or topic=="3_pseudorandomness")
+    # "The claim that ..." reports the claim; it is NOT an admission
+    # that the reviewer is quoting an error to criticise it.
     quoted_error=bool(re.search(
-        r"\b(?:incorrectly|wrongly|mistakenly|invalidly|falsely|"
-        r"claims?\s+that|assumes?\s+that|error\s+(?:is|in))\b",t,re.I))
+        r"\b(?:incorrectly|wrongly|mistakenly|falsely)\s+"
+        r"(?:claims?|states?|assumes?)\b|"
+        r"\berror\s+(?:is|in)\b",t,re.I))
     notes=[]
     def add(kind,reference,message):
         notes.append({"claim_id":ident,"kind":kind,"reference":reference,
@@ -122,7 +125,10 @@ def objection_conflicts(question: str, ident: str, issue: str,
             r"\b(?:reveal\w*|known|learn\w*|given|disclos\w*)\b",t,re.I))
         key_condemned=bool(re.search(
             r"\b(?:contradict\w*|trivial\w*|break\w*|insecure|"
-            r"violat\w*|undermin\w*)\b",t,re.I))
+            r"violat\w*|undermin\w*|simply)\b|"
+            r"\b(?:generat\w*|produc\w*|comput\w*|creat\w*)\b"
+            r".{0,40}\b(?:multiple|two|several|different|distinct)\b"
+            r".{0,45}\b(?:proofs?|outputs?|hashes?)\b",t,re.I))
         key_computation=bool(re.search(
             r"\b(?:us\w*|comput\w*|evaluat\w*)\b.{0,75}"
             r"\b(?:secret\s+key|\bsk\b|vrf)\b",t,re.I) and
@@ -168,9 +174,12 @@ def objection_conflicts(question: str, ident: str, issue: str,
         r"\b(?:sk|secret\s+key)\b.{0,60}"
         r"\b(?:access|knowledge|known|revealed|given)\b",t,re.I))
     condemns_key=bool(re.search(
-        r"\b(?:trivial\w*|easily|break\w*|"
+        r"\b(?:trivial\w*|easily|simply|break\w*|undermin\w*|"
         r"can\s+produce\s+(?:two|collisions?)|"
-        r"can\s+compute\s+.{0,50}collisions?)\b",t,re.I))
+        r"can\s+compute\s+.{0,50}collisions?)\b|"
+        r"\b(?:generat\w*|produc\w*|comput\w*|creat\w*)\b"
+        r".{0,40}\b(?:multiple|two|several|different|distinct)\b"
+        r".{0,45}\b(?:proofs?|outputs?|hashes?)\b",t,re.I))
     concealed_key=bool(re.search(
         r"\b(?:cannot|not|must\s+not)\s+"
         r"(?:compute|obtain|learn|know|receive)\s+"
@@ -182,6 +191,23 @@ def objection_conflicts(question: str, ident: str, issue: str,
             "The trusted-uniqueness adversary may know and use the honestly "
             "generated SK. This alone cannot produce two different accepting "
             "outputs for one input.")
+    # A second valid proof with the SAME output is permitted. Mark only
+    # objections that incorrectly demand unique proofs regardless of output.
+    proof_only=bool(re.search(
+        r"\b(?:no\s+two\s+(?:distinct\s+)?(?:valid\s+)?proofs?|"
+        r"unique\s+proofs?|uniqueness\s+of\s+proofs?|"
+        r"(?:pi1|π1)\s*(?:!=|≠)\s*(?:pi2|π2))\b"
+        r".{0,160}\b(?:regardless\s+of\s+(?:the\s+)?output|"
+        r"must\s+(?:not\s+)?exist|requirement|must|"
+        r"even\s+if\s+(?:the\s+)?outputs?\s+(?:is|are)\s+(?:the\s+)?same)\b|"
+        r"\b(?:ignoring|ignores?|does\s+not\s+consider)\b"
+        r".{0,80}\b(?:requirement|must|no\s+two)\b"
+        r".{0,80}\b(?:distinct\s+)?(?:valid\s+)?proofs?\b",
+        t,re.I))
+    if unique and proof_only and not quoted_error:
+        add("not_required_unique_proofs","RFC 9381 Sections 3.1 and 3.3",
+            "Uniqueness forbids two different accepted OUTPUTS for one input; "
+            "multiple proofs for the same output are not a uniqueness break.")
     # For §3.4 the challenge is deliberately output-only. Detect objections
     # claiming that omission itself leaks the hidden bit. Do not flag a
     # correct objection that demands withholding the proof in both worlds.
@@ -308,7 +334,12 @@ FULL_PK_SCOPE = re.compile(
     r"adversarially\s+(?:chosen|selected))\b.{0,55}"
     r"\b(?:public\s+key|pk|keys?)\b|"
     r"\b(?:public\s+key|pk|keys?)\b.{0,55}"
-    r"\b(?:malicious\w*|arbitrary|adversarially)\b",re.I)
+    r"\b(?:malicious\w*|arbitrary|adversarially)\b|"
+    r"\badversar\w*\s+(?:choos\w*|select\w*|outputs?|produc\w*|"
+    r"picks?|suppl\w*)\b.{0,35}"
+    r"\b(?:a\s+)?(?:vrf\s+)?(?:public\s+key|pk)\b|"
+    r"\bchallenger\s+generates\s+no\s+keys\b",re.I)
+
 
 
 def partition_addressed_objections(objections: list[dict]) -> tuple[list[dict],list[dict]]:
@@ -342,6 +373,15 @@ def partition_addressed_objections(objections: list[dict]) -> tuple[list[dict],l
                     correction=None
             elif pre_issue and not post_issue and PRE_CHALLENGE.search(target):
                 correction="fresh_target_not_previously_queried"
+        if (not correction and topic=="3_pseudorandomness" and
+                re.search(r"\b(?:all|any|every)\s+post.?challenge\s+quer\w*|"
+                          r"\bforbids?\s+(?:all|any)\s+post.?challenge\b",
+                          issue,re.I)
+                and re.search(
+                    r"(?:α\s*\*|alpha\s*\*|x\s*\*|m\s*\*)"
+                    r".{0,105}(?:before\s+or\s+after|after\s+the\s+challenge)",
+                    target,re.I)):
+            correction="only_target_input_forbidden_after_challenge"
         if not correction and topic=="2_trusted_uniqueness" and re.search(
             r"\b(?:not|never|missing|lacks?|without|only\s+pk)\b"
             r".{0,65}\b(?:sk|secret\s+key)\b",issue,re.I):
