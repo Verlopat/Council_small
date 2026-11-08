@@ -101,7 +101,7 @@ def enforce_verdict(proposed: dict, ledger: ClaimLedger) -> dict:
     explicit=proposed.get("cause")
     hard_causes={"judge_error","composition_failure","deadline",
                  "quota_contention","insufficient_independence",
-                 "judge_input_too_large"}
+                 "judge_input_too_large","definition_reference_only"}
     answer=_substantive_text(proposed.get("answer"))
     partial=_substantive_text(proposed.get("partial_answer")) or answer
     if partial is None and wanted=="unresolved" and explicit is None:
