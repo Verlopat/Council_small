@@ -58,13 +58,27 @@ def run_python(code: str, *, timeout: float = 10.0) -> SandboxResult:
                     return SandboxResult("error", "unexpected_system_library_symlink")
             elif Path(mount).exists():
                 cmd += ["--ro-bind", mount, mount]
-        # Read-only interpreter/venv only, not the caller's working directory.
-        prefix = str(Path(sys.prefix).resolve())
-        if not (prefix == "/usr" or prefix.startswith("/usr/")):
-            cmd += ["--ro-bind", prefix, prefix]
+        # Binding a virtualenv to its ORIGINAL host path under /home
+        # creates /home/<user> inside bwrap (even when only the venv is
+        # readable). That leaks the home path and fails the isolation probe.
+        # Relocate it to a neutral sandbox path instead. Do not bind any
+        # interpreter directory beneath the caller's home directory.
+        prefix = Path(sys.prefix).absolute()
+        executable = Path(sys.executable).absolute()
+        if prefix == Path("/usr") or prefix.is_relative_to("/usr"):
+            if not executable.is_relative_to("/usr"):
+                return SandboxResult("error", "unexpected_system_interpreter_path")
+            sandbox_python = str(executable)
+        else:
+            if not executable.is_relative_to(prefix):
+                return SandboxResult("error", "interpreter_outside_prefix")
+            virtual_prefix = Path("/opt/council-python")
+            cmd += ["--dir", "/opt", "--ro-bind",
+                    str(prefix), str(virtual_prefix)]
+            sandbox_python = str(virtual_prefix / executable.relative_to(prefix))
         # Only this throwaway scratch directory is writable in the sandbox.
         cmd += ["--bind", work, "/work", "--chdir", "/work",
-                "--", sys.executable, "-I", "-B", "/work/check.py"]
+                "--", sandbox_python, "-I", "-B", "/work/check.py"]
         try:
             proc = subprocess.run(cmd, stdout=subprocess.PIPE,
                                   stderr=subprocess.PIPE, stdin=subprocess.DEVNULL,
