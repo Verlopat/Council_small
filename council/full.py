@@ -735,6 +735,28 @@ class FullCouncilRunner(CouncilRunner):
             out.append(result)
         return out
 
+    def _disagreement_report(self,proposals:list[dict]) -> dict|None:
+        """The useful product for open questions without authoritative text.
+
+        Show competing proposals and actual independent objections side by
+        side. Model disagreement is evidence of uncertainty, not a proof.
+        """
+        if len(proposals)<2:return None
+        views=[]
+        for p in proposals:
+            claims=[self.ledger.claims[cid] for cid in p["claim_ids"]
+                    if cid in self.ledger.claims]
+            criticisms=[{"id":o.id,"claim_id":o.claim_id,"reviewer":o.reviewer_family,
+                         "issue":o.issue[:500]}
+                        for o in self.objections if o.proposal_id==p["id"]]
+            views.append({"proposal_id":p["id"],"family":p["family"],
+                          "claims":[{"id":c.id,"statement":c.statement[:600],
+                                     "status":c.status.value} for c in claims[:8]],
+                          "objections":criticisms[:10]})
+        return {"status":"competing_unverified_views",
+                "warning":"No direct reference comparison; critiques are unverified",
+                "views":views}
+
     @staticmethod
     def _cohere_proposal_references(refs: dict[str,dict]) -> dict[str,dict]:
         """Preserve short verbatim RFC excerpts for Cohere's proposal only.
@@ -2068,6 +2090,9 @@ class FullCouncilRunner(CouncilRunner):
             "translators_used":dict(self._translator_used),
             "translator_families_unavailable":sorted(self._translators_down),
             "topic_consolidation":topic_consolidation,
+            "disagreement_report":(
+                self._disagreement_report(proposals)
+                if not rfc_refs else None),
             "reference_checks":self.reference_checks,
             "judge_source":("local_policy" if local_judge else
                             "unavailable" if judge_unavailable else "model"),
