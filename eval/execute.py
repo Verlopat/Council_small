@@ -44,7 +44,8 @@ async def run_task(task,transport,events,*,deadline,baseline_samples=0,
         runner=QuickCouncilRunner(transport,events,budget,paper_index=paper_index)
     else:
         raise ValueError("mode must be quick or full")
-    council=await runner.run(q,mode=mode)
+    council=(await runner.run(q,mode="quick") if mode=="quick"
+             else await runner.run(q))
     model_calls=sum(e["event"]=="model_call_started" for e in events.replay())
     result=council["research_result"]
     final=council.get("final_answer")
