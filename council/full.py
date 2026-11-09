@@ -1205,7 +1205,7 @@ class FullCouncilRunner(CouncilRunner):
         # proposal's claims, and at most 1.2K characters of each section.
         # A clipped passage is explicitly labelled as partial guidance;
         # complete references are reserved for the grounded objection judge.
-        if self.paper_index is not None:
+        if getattr(self,"paper_index",None) is not None:
             refs=self._reference_for_claims(
                 proposal["claim_ids"],self._rfc_game_references(question))
             if refs:
