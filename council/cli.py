@@ -18,6 +18,14 @@ def print_compact_result(result: dict, run_id: str, run_dir: Path) -> None:
     brief=result.get("research_result") or {}
     print("\nRun: "+run_id+" | status: "+str(brief.get("completion_status","unknown")))
     topics=result.get("topic_consolidation") or []
+    verified=result.get("final_answer")
+    candidates=result.get("candidate_answers") or {}
+    if verified is not None:
+        print("Evidence-supported scoped final answer: "+str(verified))
+    elif candidates:
+        visible=[str(x)+": "+str(v) for x,v in candidates.items() if v is not None]
+        if visible:
+            print("Unverified candidate answer(s): "+" | ".join(visible[:3]))
     if topics:
         print("\nBest answer per game (RFC alignment; advisory, not verified):")
         for row in topics:
@@ -34,6 +42,16 @@ def print_compact_result(result: dict, run_id: str, run_dir: Path) -> None:
             missing=row.get("missing") or []
             if missing:
                 print("  Missing: "+"; ".join(str(x) for x in missing[:2])[:260])
+    disagreement=result.get("disagreement_report") or {}
+    if disagreement.get("views") and not topics:
+        print("\nCompeting research views (unverified disagreements):")
+        for view in disagreement["views"][:4]:
+            first=(view.get("claims") or [{}])[0]
+            print("- "+str(view.get("proposal_id"))+" / "+
+                  str(view.get("family"))+": "+
+                  str(first.get("statement",""))[:250])
+            for objection in (view.get("objections") or [])[:2]:
+                print("    disputed: "+str(objection.get("issue",""))[:170])
     if brief.get("judge_summary"):
         print("\nJudge summary (advisory, not independent proof):\n"+
               str(brief["judge_summary"])[:1800])
@@ -402,6 +420,12 @@ def main(argv=None) -> int:
                          if detail=="definition_reference_only" else detail)
             print(label + ": " + str(verdict.get("status", "unresolved")) +
                   (" | cause: " + str(human_cause) if human_cause else ""))
+        if result.get("final_answer") is not None:
+            print("\nEvidence-supported scoped final answer: "+
+                  str(result["final_answer"]))
+        elif result.get("candidate_answers"):
+            print("\nUnverified candidate answers: "+
+                  str(result["candidate_answers"]))
         print("\nProposed approach (solver original):\n" +
               (brief["proposed_approach"] or "(none)"))
         if brief.get("judge_summary"):
