@@ -66,7 +66,17 @@ def load_config(path:Path)->CouncilConfig:
         raise ValueError("Unsupported solver strategy")
     _=cfg.assignment
     for provider,detail in cfg.rate_limits.items():
-        if not isinstance(detail,dict) or any(
-            not isinstance(x,(int,float)) or x<0 for x in detail.values()):
-            raise ValueError("Rate limits must be explicitly numeric")
+        allowed={"requests_per_minute","tokens_per_minute","burst",
+                 "daily_requests","daily_tokens"}
+        if (not isinstance(detail,dict) or set(detail)-allowed or
+                "requests_per_minute" not in detail or
+                any(type(x) not in (int,float) or x<=0
+                    for key,x in detail.items() if key in {
+                        "requests_per_minute","tokens_per_minute","burst"}) or
+                any(type(x) is not int or x<=0
+                    for key,x in detail.items() if key in {
+                        "daily_requests","daily_tokens"})):
+            raise ValueError("Rate limits require positive numeric caps")
+        if "tokens_per_minute" in detail and type(detail["tokens_per_minute"]) is not int:
+            raise ValueError("tokens_per_minute must be an integer")
     return cfg
