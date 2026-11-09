@@ -31,7 +31,12 @@ PROPOSAL_SCHEMA = {
     "type": "object",
     "properties": {
         "approach": STRINGS,
-        "artifact": {"type":"object","additionalProperties":True},
+        "artifact": {"type": "object", "properties": {
+            "kind": STRINGS,"code": STRINGS,
+            "valid_examples": STRING_LIST,
+            "invalid_examples": STRING_LIST},
+            "required": ["kind","code","valid_examples","invalid_examples"],
+            "additionalProperties": False},
         "claims": {"type": "array", "items": CLAIM},
         "hypotheses": STRING_LIST,
         "experiments": STRING_LIST,
