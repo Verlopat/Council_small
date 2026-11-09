@@ -56,6 +56,7 @@ class ProposedClaim(ModelSchema):
 class Proposal(ModelSchema):
     approach:str=Field(min_length=1)
     answer:str|None=None
+    artifact:dict=Field(default_factory=dict)
     claims:list[ProposedClaim]=Field(min_length=1)
     hypotheses:list[str]=Field(default_factory=list)
     experiments:list[str]=Field(default_factory=list)
