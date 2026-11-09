@@ -1462,6 +1462,15 @@ class FullCouncilRunner(CouncilRunner):
             self._screen_revision_objections(
                 self.objections,regex_withheld,self.grounded_objection_verdicts,
                 require_grounded=is_vrf_definition_question(question)))
+        if is_vrf_definition_question(question) and len(revision_objections)>6:
+            overflow=revision_objections[6:]
+            revision_objections=revision_objections[:6]
+            self.events.record("author_objection_cap",allowed=6,
+                               deferred_ids=[o.id for o in overflow])
+            unjudged_before_revision.extend([
+                {"id":o.id,"claim_id":o.claim_id,"issue":o.issue,
+                 "reason":"grounded_valid_deferred_by_cap",
+                 "reviewer_family":o.reviewer_family} for o in overflow])
         self.events.record("objections_unjudged_before_revision",
             ids=[o["id"] for o in unjudged_before_revision],
             retained_in_audit=True)
@@ -1693,10 +1702,14 @@ class FullCouncilRunner(CouncilRunner):
                          for cid in self.moderator.priority_order()
                          if self.ledger.claims[cid].status in
                          {ClaimStatus.PROPOSED, ClaimStatus.UNRESOLVED}]
-            jobs = [(claim, hunter, self.moderator.current_round)
-                    for claim in remaining[:self.hunter_cap]
-                    if (hunter := next((f for f in self.solvers
-                                        if f != claim.owner_family), None))]
+            jobs=[]
+            for i,claim in enumerate(remaining[:self.hunter_cap]):
+                choices=[f for f in self.solvers
+                         if f not in {claim.owner_family,
+                                      self.judge_family,self.auditor_family}]
+                if choices:
+                    jobs.append((claim,choices[i%len(choices)],
+                                 self.moderator.current_round))
             await self._hunt_batch(jobs)
         advisory_findings=self._vrf_findings(question,proposals)
         if advisory_findings:
@@ -1819,8 +1832,13 @@ class FullCouncilRunner(CouncilRunner):
         # A blind judge sees the claim ledger, not the author's complete prose.
         # Keep the original solver explanation as the proposed approach even
         # when the judge returns a valid but unhelpfully short summary.
-        if (not local_judge and not judge_unavailable
-                and isinstance(partial,str) and partial.strip()):
+        substantive=(isinstance(partial,str) and
+                     (len(re.sub(r"[\W_]+","",partial))>=40 or
+                      (not is_vrf_definition_question(question) and
+                       bool(__import__("council.final_answers",
+                                       fromlist=["extract_final_answer"])
+                            .extract_final_answer(partial)))))
+        if not local_judge and not judge_unavailable and substantive:
             brief.judge_summary=partial.strip()
         elif not local_judge and not judge_unavailable:
             self.events.record("judge_partial_fallback",
