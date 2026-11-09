@@ -12,12 +12,13 @@ import time
 import uuid
 from council.budget import RunBudget
 from council.events import EventStore
-from council.full import FullCouncilRunner
+from council.full import FullCouncilRunner,QuickCouncilRunner
 from council.transport import FamilyTransport,FamilyUnavailable
 from eval.tasks import load
 from eval.baselines import majority,best_of_n,family_vote
 from council.verify.arithmetic import check
 from answer_validation import matches_expected
+from council.final_answers import extract_final_answer
 
 def requested_baseline_calls(council_calls: int, *, user_limit: int = 0,
                              safety_cap: int = 55) -> int:
@@ -32,24 +33,52 @@ def requested_baseline_calls(council_calls: int, *, user_limit: int = 0,
     return min(council_calls, user_limit or council_calls, safety_cap)
 
 
-async def run_task(task,transport,events,*,deadline,baseline_samples=0):
+async def run_task(task,transport,events,*,deadline,baseline_samples=0,
+                   mode="full",paper_index=None):
     q=task["prompt"]
     budget=RunBudget.start(deadline,reserve=min(15.,deadline/4))
     initial=time.monotonic()
-    runner=FullCouncilRunner(transport,events,budget)
-    council=await runner.run(q)
+    if mode=="full":
+        runner=FullCouncilRunner(transport,events,budget,paper_index=paper_index)
+    elif mode=="quick":
+        runner=QuickCouncilRunner(transport,events,budget,paper_index=paper_index)
+    else:
+        raise ValueError("mode must be quick or full")
+    council=await runner.run(q,mode=mode)
     model_calls=sum(e["event"]=="model_call_started" for e in events.replay())
     result=council["research_result"]
-    output={"task_id":task["id"],"system":"council",
-            "answer":result.get("proposed_approach",""),
+    final=council.get("final_answer")
+    candidates=council.get("candidate_answers") or {}
+    # Selected/deployable candidate: first verified answer if available,
+    # otherwise the first original solver's extracted final answer.
+    # "Any candidate correct" is an ORACLE UPPER BOUND, never the
+    # deployed predictor or an improvement claim.
+    selected=(final if final is not None else next(
+        (v for v in candidates.values() if v is not None),None))
+    output={"task_id":task["id"],"kind":task.get("kind"),
+            "mode":mode,"system":"council","answer":selected,
+            "candidate_answers":candidates,"verified_answer":final,
             "calls":model_calls,"equal_budget":True,"latency":time.monotonic()-initial,
             "unresolved":council.get("verdict",{}).get("status")!="answer",
             "composition_unchecked":council.get("composition",{}).get("outcome")=="unchecked"}
     if "expected" in task:
-        output["correct"]=int(matches_expected(
-            str(council.get("verdict",{}).get("answer") or ""),str(task["expected"])))
+        gold=str(task["expected"])
+        output["correct"]=int(selected is not None and
+                              matches_expected(str(selected),gold))
+        output["correct_verified"]=int(final is not None and
+                                      matches_expected(str(final),gold))
+        output["correct_candidate"]=int(any(
+            matches_expected(str(a),gold) for a in candidates.values()
+            if a is not None))
+        output["false_verified"]=int(
+            final is not None and not matches_expected(str(final),gold))
+        output["verified"]=int(final is not None)
+        output["candidate_oracle_upper_bound"]=True
     else:
         output["correct"]=None
+        output["correct_verified"]=None
+        output["correct_candidate"]=None
+        output["false_verified"]=None
         output["manual_review_required"]=True
     baseline_outputs=[]
     baseline_budget=RunBudget.start(deadline,reserve=0)
@@ -128,7 +157,7 @@ async def run_task(task,transport,events,*,deadline,baseline_samples=0):
     return [output]+output_base+[vote_row]
 
 async def execute(tasks,*,out_dir:Path,deadline:float,max_tasks:int,
-                  baseline_samples:int):
+                  baseline_samples:int,mode:str="full",paper_index=None):
     out_dir.mkdir(parents=True,exist_ok=True)
     rows=[]
     for task in tasks[:max_tasks]:
@@ -136,7 +165,8 @@ async def execute(tasks,*,out_dir:Path,deadline:float,max_tasks:int,
         with EventStore(out_dir,run_id) as events:
             transport=FamilyTransport(record=events.record)
             rows+=await run_task(task,transport,events,deadline=deadline,
-                                 baseline_samples=baseline_samples)
+                                 baseline_samples=baseline_samples,
+                                 mode=mode,paper_index=paper_index)
     dest=out_dir/"results.jsonl"
     with dest.open("w",encoding="utf-8") as fh:
         for row in rows:
@@ -145,7 +175,13 @@ async def execute(tasks,*,out_dir:Path,deadline:float,max_tasks:int,
 
 def main(argv=None):
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("tasks",type=Path)
+    parser.add_argument("tasks",type=Path,nargs="?",
+                        help="Task JSONL; --tasks is also supported")
+    parser.add_argument("--tasks",dest="tasks_option",type=Path,
+                        help="Task JSONL path")
+    parser.add_argument("--mode",choices=("quick","full"),default="full")
+    parser.add_argument("--paper-index",type=Path,
+                        help="Existing local SQLite paper index, optional")
     parser.add_argument("--split",choices=("dev","heldout"),default="dev")
     parser.add_argument("--max-tasks",type=int,default=3)
     parser.add_argument("--deadline",type=float,default=240)
@@ -156,7 +192,12 @@ def main(argv=None):
     args=parser.parse_args(argv)
     if not 1<=args.max_tasks<=100 or not 0<=args.baseline_samples<=55:
         parser.error("Unsafe task or sample count")
-    tasks=load(args.tasks,split=args.split)
+    selected_tasks=args.tasks_option or args.tasks
+    if selected_tasks is None:
+        parser.error("Supply task path or --tasks")
+    tasks=load(selected_tasks,split=args.split)
+    if args.paper_index and not args.paper_index.is_file():
+        parser.error("--paper-index must point to an existing SQLite index")
     upper_calls=args.max_tasks*(55+(args.baseline_samples or 55)+6)
     if not args.confirm_free:
         print(json.dumps({"mode":"plan_only","tasks":min(len(tasks),args.max_tasks),
@@ -164,9 +205,18 @@ def main(argv=None):
                           "max_possible_calls_warning":upper_calls,
                           "warning":"No APIs called. Confirm free/non-billed account limits. Equal CALLS are not equal TOKENS or tool availability."},indent=2))
         return
-    path,rows=asyncio.run(execute(tasks,out_dir=args.out_dir,
-                       deadline=args.deadline,max_tasks=args.max_tasks,
-                       baseline_samples=args.baseline_samples))
+    index=None
+    if args.paper_index:
+        from council.verify.source import PaperIndex
+        index=PaperIndex(args.paper_index)
+    try:
+        path,rows=asyncio.run(execute(tasks,out_dir=args.out_dir,
+                           deadline=args.deadline,max_tasks=args.max_tasks,
+                           baseline_samples=args.baseline_samples,
+                           mode=args.mode,paper_index=index))
+    finally:
+        if index is not None:
+            index.close()
     print(json.dumps({"saved":str(path),"rows":len(rows),
                       "warning":"Open-ended research rows need blinded human scoring"},indent=2))
 
