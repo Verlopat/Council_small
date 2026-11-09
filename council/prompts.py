@@ -35,7 +35,16 @@ If no official reference was supplied, state limitations rather than
 pretending that a source was checked.
 Return ONE complete JSON object with required top-level keys:
 approach (nonempty string), claims (nonempty list), hypotheses (list of strings),
-experiments (list of strings). Write AT MOST SIX substantive atomic claims;
+experiments (list of strings), artifact (object).
+If the task is numeric, code, or symbolic, optionally supply a SELF-WRITTEN
+check as artifact = {"kind":"python","code":"Python source ending in a printed
+JSON object with pass: true/false","valid_examples":[],"invalid_examples":[]}.
+For any other task or whenever a discriminating test cannot be supplied, use
+{"kind":"none","code":"","valid_examples":[],"invalid_examples":[]}.
+Self-written tests are NOT independent verification or scientific proof;
+never claim to have run the artifact. Positive/negative examples (if supplied)
+must be complete standalone Python scripts that print final JSON pass booleans.
+DO NOT write raw code outside the JSON artifact. Write AT MOST SIX substantive atomic claims;
 for a three-game VRF question, give one core claim for EACH named game
 before any supporting claims. Be concise: avoid repeating the approach inside
 each statement and avoid verbose commentary. Every claim has keys
