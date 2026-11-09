@@ -14,8 +14,14 @@ def matches_expected(response: str, expected: str) -> bool:
     Examples: 156, 156.0, Answer: 156, The answer is **156**.,
     12 * 13 = 156. Do not accept an arbitrary mention of 156 in prose.
     """
+    # Missing/empty model answers (including an abstaining vote6 baseline)
+    # are incorrect, not a reason to abort the entire evaluation.
+    if not isinstance(response, str) or not isinstance(expected, str):
+        return False
     actual = response.strip()
     wanted = expected.strip()
+    if not actual or not wanted:
+        return False
     if actual == wanted:
         return True
     if wanted.lower() in {"yes","no","true","false"}:
