@@ -32,7 +32,7 @@ from council.translate import plan, decisive_if_supported
 from council.verify.ladder import verify
 from council.compose import compose_answer
 from council.workflow import CouncilRunner
-from council.final_answers import proposal_answers
+from council.final_answers import proposal_answers, extract_final_answer
 from council.requirements import Requirements
 from council.vrf_sanity import scan_vrf_games, unsupported_full_sk_secrecy
 from council.vrf_audit import (scan_audit_issues, objection_conflicts,
@@ -1835,9 +1835,7 @@ class FullCouncilRunner(CouncilRunner):
         substantive=(isinstance(partial,str) and
                      (len(re.sub(r"[\W_]+","",partial))>=40 or
                       (not is_vrf_definition_question(question) and
-                       bool(__import__("council.final_answers",
-                                       fromlist=["extract_final_answer"])
-                            .extract_final_answer(partial)))))
+                       bool(extract_final_answer(partial)))))
         if not local_judge and not judge_unavailable and substantive:
             brief.judge_summary=partial.strip()
         elif not local_judge and not judge_unavailable:
