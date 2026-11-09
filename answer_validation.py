@@ -18,6 +18,15 @@ def matches_expected(response: str, expected: str) -> bool:
     wanted = expected.strip()
     if actual == wanted:
         return True
+    if wanted.lower() in {"yes","no","true","false"}:
+        # Symbolic truth tasks use an explicit terminal yes/no answer, not
+        # arbitrary occurrences of "yes" somewhere in a proof.
+        last=actual.splitlines()[-1].strip().replace("**","").strip()
+        found=re.fullmatch(
+            r"(?i)(?:(?:the\s+)?(?:final\s+)?answer\s*(?::|is|=)\s*)?"
+            r"(yes|no|true|false)[.!]?",last)
+        aliases={"true":"yes","yes":"yes","false":"no","no":"no"}
+        return bool(found and aliases[found.group(1).lower()]==aliases[wanted.lower()])
     if not re.fullmatch(NUMBER, wanted):
         return False
     if not actual:
