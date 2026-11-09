@@ -6,6 +6,7 @@ model's prose judgment.
 """
 from __future__ import annotations
 import json
+import unicodedata
 from collections import defaultdict
 from council.definition_sources import topic_text
 from council.models import ClaimLedger, ClaimStatus
@@ -131,11 +132,17 @@ TOPIC_SECTIONS = {
 
 def _flat(text: str) -> str:
     """Normalize RFC line wraps and soft hyphens without changing words."""
-    return " ".join(text.replace("\u00ad", "").split()).casefold()
+    # Normalize line-wrap, Unicode compatibility forms and typographic
+    # apostrophes/dashes, never fuzzy-editing logical negation/inequalities.
+    normalized=unicodedata.normalize("NFKC",text)
+    normalized=normalized.replace("\u00ad","").replace("’","'").replace("‘","'")
+    normalized=normalized.replace("–","-").replace("—","-")
+    return " ".join(normalized.split()).casefold()
 
 
 def normalize_topic_judgment(topic: str, reference: dict, versions: list[dict],
-                             candidate: dict | None) -> dict:
+                             candidate: dict | None,
+                             on_quote_rejected=None) -> dict:
     """Keep one source-alignment opinion per game; never upgrade evidence.
 
     Model-supplied quotations must match the indexed excerpt after whitespace
@@ -158,6 +165,10 @@ def normalize_topic_judgment(topic: str, reference: dict, versions: list[dict],
         if verdict not in {"matches","contradicts","incomplete"}:
             verdict="incomplete"
         if not grounded and verdict in {"matches","contradicts"}:
+            if on_quote_rejected is not None:
+                on_quote_rejected(topic=topic,version=ident,
+                                  raw_quote=quote[:300],
+                                  reason="reference_quote_not_exact")
             verdict="incomplete"
         rows.append({"id":ident,"statement":original["statement"],
                      "status":verdict,"reference_quote":quote if grounded else "",
