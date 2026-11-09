@@ -269,6 +269,19 @@ def main(argv=None):
                           "max_possible_calls_warning":upper_calls,
                           "warning":"No APIs called. Confirm free/non-billed account limits. Equal CALLS are not equal TOKENS or tool availability."},indent=2))
         return
+    # Checking the sandbox in a separate terminal must not be optional:
+    # otherwise Phase-A can spend provider quota and attempt generated-code
+    # tests even when host-home isolation is known to be broken.
+    from council.preflight import sandbox_report
+    checks=sandbox_report()
+    required=("execution","network_isolation",
+              "host_home_isolation","environment_isolation")
+    failed=[name for name in required
+            if name not in checks or checks[name].status!="pass"]
+    if failed:
+        parser.error("Sandbox preflight failed ("+", ".join(failed)+
+                     "); no provider calls started. Run "
+                     "'python -m council.preflight --json' and fix isolation.")
     rate_limits={}
     if args.config.is_file():
         from council.config import load_config
