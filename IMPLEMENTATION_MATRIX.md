@@ -1,33 +1,53 @@
-# Architecture v4 — implementation boundaries
+# Architecture v4 — current implementation and evidence status (2026-11-09)
 
-The Appendix corrections (pages 33–40) override the early weak/strong status policy. Code enforces an evidence policy; it does not decide mathematical truth.
+The Appendix corrections override the older weak/strong status policy. **Checked code, a model's opinion, and an actual mathematical security proof are different forms of evidence.** A passing verifier does not automatically establish the correspondence between an English claim and its formal artifact.
 
-| Requirement | Implementation | Remaining validation |
+| Capability | Implemented | What has actually been demonstrated |
 | --- | --- | --- |
-| Eight free-tier provider routes and family-aware fallback | `model_router.py`, `council/families.py`, `transport.py`, `providers.py` | Provider identity, rate limits and zero billing must be checked with real accounts |
-| Independent proposals, role reservation and blind judge | `assignment.py`, `full.py`, `judge.py` | Four independent solvers may require `auditor: null` unless a seventh working family is available |
-| Owner/rival claim extraction, assumptions and quantifiers | `extract.py`, `schemas.py`, `models.py` | Models can miss implicit assumptions or invalid implications |
-| Cross-family review, author response and review of revisions | `full.py`, `protocol.py`, `prompts.py` | Reviews are not independent proof |
-| Claim states, versioned evidence and dependency records | `models.py`, `dependencies.py`, `ledger.py` | Premise-edge validity must be independently established |
-| Conservative duplicate suggestions | `extract.py` | Similarity never automatically merges claims |
-| Scoped arithmetic, SymPy, Z3, Python, mutation and formal tools | `council/verify/`, `preflight.py` | Bubblewrap, packages and formal tools must work on the real host; proof-to-prose translation requires separate checking |
-| Typed debate, round gating, caps and four stalemate outcomes | `bus.py`, `moderator.py`, `evidence.py`, `overseer.py` | Full asynchronous behavior and robustness require practical evaluation |
-| Rate buckets, quota accounting and bounded requests | `quota.py`, `transport.py`, `budget.py`, `process_infer.py` | Configure actual account request/token caps and validate cancellation |
-| Quick, research and full modes | `cli.py`, `workflow.py`, `full.py`, `config.py` | Real provider runs and missing-role degradation must be observed |
-| Composition check and partial verdict | `compose.py`, `judge.py` | Arbitrary code-composition security is not mechanically proved |
-| SQLite+JSONL persistence, response cache and replay | `events.py`, `replay.py`, `call_cache.py`, `ledger.py` | Interruption and multi-process crash/recovery validation outstanding |
-| Local source passages and research output contract | `verify/source.py`, `papers.py`, `models.py` | Source passage presence does not establish truth or novelty |
-| Equal-budget baselines, phase-A and research evaluation | `eval/execute.py`, `eval/phase_a.py`, `eval/research_metrics.py`, `eval/tasks/` | Need held-out scored experiments, confidence intervals and token/tool-budget comparisons |
-| Weekly model-quality monitoring | `eval/regression_live.py`, `.github/workflows/regression.yml` | Disabled pending owner opt-in and explicit request cap |
+| Free-only provider routing, independent proposals, judge, reserved audit | `model_router.py`, `council/families.py`, `council/full.py` | User-run VRF definition experiment; provider availability, lineages and billing require recurring account confirmation |
+| Full and quick definition mode | `council/cli.py`, `council/definition_sources.py`, `council/judge.py` | Five quick and five full **live** VRF definition runs completed before these mechanical-check changes: 8 and 134 completed responses respectively, with 8 and 161 logged attempts and 11 full-mode advisory picks; manual correctness comparison not yet scored |
+| Reference-grounded VRF objections and cross-game anchors | `council/objection_sections.py`, `council/vrf_audit.py`, `council/full.py` | Offline regression tests cover known misclassifications; quote matching and model verdicts remain advisory |
+| Independent verifier translator with fallback | `council/full.py`, `council/translate.py` | Offline simulated first-family failure and independent fallback; **not demonstrated live for checkable claims** |
+| Author-generated optional self-checks | `council/schemas.py`, `council/structured.py`, `council/verify/python_exec.py` | Scripts execute only inside fail-closed bubblewrap; evidence always marked nonindependent; mutation checks require positive and negative fixtures |
+| Actual checkers (numeric, SymPy, Z3, Python, mutation, optional formal) | `council/verify/`, `council/preflight.py` | Offline unit tests, **not yet preflight-verified on user's machine**; missing bwrap cannot trigger unsafe host execution |
+| Candidate vs evidence-supported final answers | `council/final_answers.py`, `council/full.py` | Conservative numeric/boolean extraction and offline support gating; candidates explicitly unverified |
+| Bounded evidence, versioned ledger and debate | `council/models.py`, `council/moderator.py`, `council/ledger.py` | Offline regression tests; proof-to-English alignment and universal claims still unresolved |
+| Source-free disagreement report | `council/full.py`, `council/cli.py` | Competing claims/reviewer objections recorded, never marked proved |
+| Per-provider quota controls and pacing | `council/quota.py`, `council/transport.py`, `council/config.py` | Provider-shared TPM/RPM queue; **actual free limits must be entered by the account owner**. Unconfigured 30-RPM pacing is protective, not a provider guarantee |
+| Evaluation metrics and baselines | `eval/execute.py`, `eval/run_eval.py` | Selected accuracy distinct from verified accuracy, false-verified rate, and candidate-oracle upper bound; paired task-bootstrap CI, per-kind quick/full comparison; **no checkable-task live Phase-A results yet** |
+| Phase-A tasks | `eval/generate_tasks.py`, `eval/tasks/phase_a_dev.jsonl`, `eval/tasks/phase_a_heldout.jsonl` | Two disjoint sets of 90 original-generated numeric/code/symbolic tasks, including hidden code edge cases and false symbolic identities |
+| Research-task evaluation and annotation | `eval/research_metrics.py`, `eval/tasks/dev_research.jsonl` | 30 development cases available, but no recorded independently scored live research evaluation |
+| Replay, structured events, SQLite | `council/events.py`, `council/replay.py` | Offline tests; full interruption/resume recovery still needs real testing |
 
-## Hard gates
+## Mandatory local prerequisite
 
-1. Validate actual free accounts, model outputs, identities and rate-limit headers.
-2. Verify sandbox network/file-system isolation and SymPy, Z3 and optional proof tools on the target machine.
-3. Independently audit the correspondence between natural-language claims and executable/formal artifacts.
-4. Evaluate false positives, missed objections, useful repairs, latency, tokens and cost against fair baselines, using untouched held-out scenarios.
-5. Verify deadlines and resume behavior under actual transport faults and interruptions.
+Install only when needed and on your own machine, then inspect actual results:
 
-## Clean repository policy
+```bash
+sudo pacman -S bubblewrap
+python -m pip install -r requirements.txt
+python -m council.preflight --json
+```
 
-Only active runtime, configuration, docs, evaluation and **opt-in scored regression** components remain on `main`. Standalone unit-test files and their automatic test workflow have been removed at the user's request. Previous test history is still accessible in Git; the absence of the tests is not a claim of security or mathematical correctness.
+Preflight must report **pass** for sandbox execution, network isolation, home isolation, and environment isolation. Any failure means generated code must remain unexecuted. Optional SymPy/Z3 availability and proof tools require separate inspection.
+
+## Live evaluation (opt-in only)
+
+```bash
+python -m eval.execute --tasks eval/tasks/phase_a_dev.jsonl --mode quick --max-tasks 30 --out runs/eval_quick --confirm-free
+python -m eval.execute --tasks eval/tasks/phase_a_dev.jsonl --mode full --max-tasks 30 --out runs/eval_full --confirm-free
+python -m eval.run_eval runs/eval_quick runs/eval_full
+```
+
+Inspect `python -m eval.execute --help` and run without `--confirm-free` first to see the request estimate. The two systems must be compared on equivalent tasks; paid quota, provider overload, missing tool privileges, unequal baseline calls, and token use are methodological caveats. Do not use heldout to tune thresholds.
+
+For research evaluations, complete blinded human annotations using `eval/research_metrics.py`; no automatic model opinion replaces human scientific review.
+
+## Security and reporting boundaries
+
+1. A model-written self-check is recorded only as **unchecked author evidence**, never independent support.
+2. Passing a bounded local checker proves only its declared scope, not an unrestricted theorem or an RFC security property.
+3. Exact RFC quotation matching is retained rather than approximate semantic matching that could accidentally normalize away critical quantifiers.
+4. Review claims and objections remain audit-visible, including unjudged or quote-rejected items.
+5. No live provider-backed Phase-A, research evaluation, or local bwrap preflight has been run by the assistant.
+6. The historical core regression suite and automated GitHub Actions tests are present again on `main`; prior text claiming they were removed was stale.
