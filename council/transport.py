@@ -45,7 +45,16 @@ class FamilyTransport:
         self.router = Router(timeout=timeout)
         self.cache = HealthCache(health_file or Path(".router_health.json"))
         self.record = record or (lambda *a, **k: None)
-        self.quota = QuotaScheduler(default_rate=600, default_burst=1)
+        # Gentle unconfigured pacing (30 RPM/account) is a protective
+        # floor, NOT a claim about any provider's free-tier allowance.
+        # Real RPM/TPM caps must be configured from provider dashboards.
+        try:
+            safe_rpm=float(os.getenv("COUNCIL_UNCONFIGURED_RPM","30"))
+        except ValueError:
+            raise ValueError("COUNCIL_UNCONFIGURED_RPM must be numeric") from None
+        if not 1 <= safe_rpm <= 600:
+            raise ValueError("COUNCIL_UNCONFIGURED_RPM must be 1..600")
+        self.quota = QuotaScheduler(default_rate=safe_rpm, default_burst=1)
         # Provider limits are user-confirmed settings, not guessed quotas.
         try:
             configured = json.loads(os.getenv('COUNCIL_LIMITS_JSON', '{}'))
