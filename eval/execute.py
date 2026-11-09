@@ -95,6 +95,10 @@ async def run_task(task,transport,events,*,deadline,baseline_samples=0,
         output["sample_correct"]=output.get("correct")
         output["correct"]=(None if hidden=="unavailable" else
                            int(hidden=="pass"))
+        # Checking a displayed integer never certifies the whole program.
+        output["correct_verified"]=None
+        output["false_verified"]=None
+        output["verified"]=0
         # The candidate-oracle figure comes from sample outputs, not hidden
         # code correctness. Do not compare it against code baselines.
         output["correct_candidate"]=None
