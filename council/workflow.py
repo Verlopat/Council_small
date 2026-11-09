@@ -168,7 +168,8 @@ class CouncilRunner:
         return {"id": proposal_id, "family": family, "approach": approach,
                 "claim_ids": list(claim_map.values()), "claim_map": claim_map,
                 "hypotheses": string_list(body, "hypotheses"),
-                "experiments": string_list(body, "experiments")}
+                "experiments": string_list(body, "experiments"),
+                "artifact":body.get("artifact") if isinstance(body.get("artifact"),dict) else {}}
 
     async def run(self, question: str, *, mode: str = "research") -> dict:
         if mode not in {"quick", "research"}:
