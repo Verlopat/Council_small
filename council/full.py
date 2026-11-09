@@ -32,6 +32,7 @@ from council.translate import plan, decisive_if_supported
 from council.verify.ladder import verify
 from council.compose import compose_answer
 from council.workflow import CouncilRunner
+from council.final_answers import proposal_answers
 from council.requirements import Requirements
 from council.vrf_sanity import scan_vrf_games, unsupported_full_sk_secrecy
 from council.vrf_audit import (scan_audit_issues, objection_conflicts,
@@ -315,6 +316,66 @@ class FullCouncilRunner(CouncilRunner):
                 except ValueError as exc:
                     self.warnings.append(
                         dependent.id + ": dependency rejected (" + str(exc) + ")")
+
+    async def _run_author_artifact(self, proposal:dict) -> None:
+        """Optional author check; bwrap only, never independent claim evidence.
+
+        Mutation testing uses supplied positive and negative fixtures when
+        available; a bare JSON-pass script is explicitly NOT mutation-tested.
+        """
+        data=proposal.get("artifact") or {}
+        if not isinstance(data,dict) or data.get("kind")!="python":
+            return
+        code=data.get("code")
+        ids=proposal.get("claim_ids",[])
+        if not ids or not isinstance(code,str) or not code.strip():
+            return
+        claim=self.ledger.claims.get(ids[0])
+        if claim is None:return
+        import hashlib
+        from council.verify.sandbox import run_python
+        from council.verify.python_exec import CheckSpecification,evaluate_spec
+        valid=data.get("valid_examples") or []
+        invalid=data.get("invalid_examples") or []
+        mutation_requested=(isinstance(valid,list) and isinstance(invalid,list)
+                           and bool(valid) and bool(invalid)
+                           and all(isinstance(v,str) for v in valid+invalid)
+                           and len(valid)<=4 and len(invalid)<=4)
+        try:
+            if mutation_requested:
+                spec=CheckSpecification(
+                    statement=claim.statement,code=code,
+                    valid_examples=tuple(valid),invalid_examples=tuple(invalid),
+                    limitation="Author-written check, not independent claim alignment",
+                    claim_version=claim.version)
+                tested=await asyncio.to_thread(evaluate_spec,spec,timeout=6)
+                outcome=tested.outcome
+                detail=tested.issue
+                mutated=bool(tested.mutation and tested.mutation.discriminating)
+            else:
+                tested=await asyncio.to_thread(run_python,code,timeout=6)
+                outcome=tested.outcome
+                detail=tested.detail
+                mutated=False
+        except (TypeError,ValueError,KeyError):
+            outcome,detail,mutated="error","invalid author artifact",False
+        digest=hashlib.sha256(code.encode("utf-8")).hexdigest()
+        ev=Evidence(id="e"+str(len(self.ledger.evidence)+1),
+                    claim_id=claim.id,claim_version=claim.version,
+                    kind=EvidenceKind.TEST,outcome=outcome,
+                    scope="Author-written check: "+claim.id+
+                          "; no independent correspondence to claim",
+                    artifact_hash=digest,independently_checked=False,
+                    checker_kind="author_python")
+        self.ledger.attach(ev)
+        self.events.record("author_artifact_checked",
+                           proposal_id=proposal["id"],claim_id=claim.id,
+                           outcome=outcome,detail=detail,
+                           mutation_tested=mutation_requested,
+                           discriminating=mutated,
+                           independently_checked=False)
+        self.extra_obligations.append(claim.id+
+            ": author-written check is not independent evidence")
 
     def _translator_candidates(self, claim: Claim) -> list[str]:
         """Independent free-tier families in deterministic fallback order.
@@ -1333,6 +1394,10 @@ class FullCouncilRunner(CouncilRunner):
                 continue
             proposals.append(p)
             self.events.record("proposal_received",proposal=p)
+        # Run voluntary self-checks before deliberation, but never promote
+        # an author-written script to independently supported claim status.
+        for p in proposals:
+            await self._run_author_artifact(p)
         # Sealed stage ends only after all proposal calls have returned.
         # An isolated solver cannot constitute a full independent Council.
         # Keep source diagnostics, but do not spend quota on peer review,
@@ -1965,6 +2030,8 @@ class FullCouncilRunner(CouncilRunner):
             "unresolved_objections_display_omitted":omitted,
             "grounded_out_of_scope_objections":out_of_scope,
             "grounded_objection_verdicts":grounded,
+            "final_answer":proposal_answers(proposals,self.ledger)[0],
+            "candidate_answers":proposal_answers(proposals,self.ledger)[1],
             "translators_used":dict(self._translator_used),
             "translator_families_unavailable":sorted(self._translators_down),
             "topic_consolidation":topic_consolidation,
