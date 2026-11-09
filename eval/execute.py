@@ -19,6 +19,7 @@ from eval.baselines import majority,best_of_n,family_vote
 from council.verify.arithmetic import check
 from answer_validation import matches_expected
 from council.final_answers import extract_final_answer
+from eval.code_tasks import extract_function_source,hidden_case_outcome
 
 def requested_baseline_calls(council_calls: int, *, user_limit: int = 0,
                              safety_cap: int = 55) -> int:
@@ -81,6 +82,22 @@ async def run_task(task,transport,events,*,deadline,baseline_samples=0,
         output["correct_candidate"]=None
         output["false_verified"]=None
         output["manual_review_required"]=True
+    if task.get("kind")=="code" and isinstance(task.get("hidden_spec"),dict):
+        # Selection is syntactic only: never inspect hidden cases to choose a
+        # proposal. The hidden test measures the first runnable code version.
+        sources=[p.get("answer") or p.get("approach")
+                 for p in council.get("proposals",[]) or []
+                 if isinstance(p,dict)]
+        source=next((v for v in sources if extract_function_source(v)),None)
+        hidden=await asyncio.to_thread(
+            hidden_case_outcome,source,task["hidden_spec"])
+        output["code_hidden_outcome"]=hidden
+        output["sample_correct"]=output.get("correct")
+        output["correct"]=(None if hidden=="unavailable" else
+                           int(hidden=="pass"))
+        # The candidate-oracle figure comes from sample outputs, not hidden
+        # code correctness. Do not compare it against code baselines.
+        output["correct_candidate"]=None
     baseline_outputs=[]
     baseline_budget=RunBudget.start(deadline,reserve=0)
     target_samples = requested_baseline_calls(
@@ -133,6 +150,18 @@ async def run_task(task,transport,events,*,deadline,baseline_samples=0,
                                                     str(task["expected"])))
             else:best["correct"]=None
             output_base.append(best)
+        elif task.get("kind")=="code":
+            # Public syntax-only selection; hidden fixtures are used ONLY
+            # for scoring, never to choose the winning baseline response.
+            selected=best_of_n(baseline_outputs,
+                lambda answer:(bool(extract_function_source(answer)),
+                               float(bool(extract_function_source(answer)))))
+            best={"task_id":task["id"],"system":"best_of_n",
+                  "answer":selected.answer,"calls":len(baseline_outputs),
+                  "equal_budget":len(baseline_outputs)==model_calls,
+                  "unresolved":selected.answer is None,
+                  "correct":None}
+            output_base.append(best)
     else:output_base=[]
     # Plain cross-family voting is a distinct control from repeated gpt-oss.
     # Six families are required; a provider endpoint never gets an extra vote.
@@ -155,6 +184,14 @@ async def run_task(task,transport,events,*,deadline,baseline_samples=0,
               "unresolved":vote6.answer is None}
     vote_row["correct"]=(int(matches_expected(str(vote6.answer or ""),
                             str(task["expected"]))) if "expected" in task else None)
+    if task.get("kind")=="code" and isinstance(task.get("hidden_spec"),dict):
+        for row in output_base+[vote_row]:
+            hidden=await asyncio.to_thread(
+                hidden_case_outcome,row.get("answer"),task["hidden_spec"])
+            row["code_hidden_outcome"]=hidden
+            row["sample_correct"]=row.get("correct")
+            row["correct"]=(None if hidden=="unavailable" else
+                            int(hidden=="pass"))
     return [output]+output_base+[vote_row]
 
 async def execute(tasks,*,out_dir:Path,deadline:float,max_tasks:int,
