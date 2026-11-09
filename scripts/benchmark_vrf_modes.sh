@@ -15,6 +15,14 @@ if ! [[ "$COUNT" =~ ^[1-9][0-9]*$ ]] || (( COUNT > 100 )); then
 fi
 
 QUESTION='Explain full uniqueness, trusted uniqueness, and pseudorandomness security games for a lattice-based VRF.'
+# Avoid quick mode immediately consuming quota before its paired full run.
+# Set PAUSE_SECONDS=0 to opt out; never overwrite completed results.
+PAUSE_SECONDS="${PAUSE_SECONDS:-90}"
+if ! [[ "$PAUSE_SECONDS" =~ ^[0-9]+$ ]]; then
+  echo "PAUSE_SECONDS must be an integer number of seconds" >&2
+  exit 2
+fi
+previous_call=0
 mkdir -p runs
 
 for ((i=1; i<=COUNT; ++i)); do
@@ -28,6 +36,11 @@ for ((i=1; i<=COUNT; ++i)); do
       echo "Existing $target is invalid JSON; move it aside before retrying." >&2
       exit 1
     fi
+    if (( previous_call == 1 && PAUSE_SECONDS > 0 )); then
+      echo "Pacing: sleeping ${PAUSE_SECONDS}s between live API runs"
+      sleep "$PAUSE_SECONDS"
+    fi
+    previous_call=1
     tmp="${target}.partial"
     deadline=240
     [[ "$mode" == "full" ]] && deadline=1200
