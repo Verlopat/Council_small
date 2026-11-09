@@ -724,7 +724,10 @@ class FullCouncilRunner(CouncilRunner):
                 # omit them while correctly returning version judgments.
                 candidate.setdefault("topic",topic)
                 candidate["summary"]=candidate.get("summary") or ""
-            result=normalize_topic_judgment(topic,excerpt,versions,candidate)
+            result=normalize_topic_judgment(
+                topic,excerpt,versions,candidate,
+                on_quote_rejected=lambda **fields:
+                    self.events.record("topic_quote_rejected",**fields))
             self.events.record("topic_consolidation",topic=topic,
                 section=section,best_version_id=result["best_version_id"],
                 reference_complete=result["reference_complete"],
