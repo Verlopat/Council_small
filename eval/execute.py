@@ -158,13 +158,32 @@ async def run_task(task,transport,events,*,deadline,baseline_samples=0,
     return [output]+output_base+[vote_row]
 
 async def execute(tasks,*,out_dir:Path,deadline:float,max_tasks:int,
-                  baseline_samples:int,mode:str="full",paper_index=None):
+                  baseline_samples:int,mode:str="full",paper_index=None,
+                  rate_limits:dict|None=None):
     out_dir.mkdir(parents=True,exist_ok=True)
     rows=[]
+    shared_quota=None
     for task in tasks[:max_tasks]:
         run_id=uuid.uuid4().hex[:16]
         with EventStore(out_dir,run_id) as events:
             transport=FamilyTransport(record=events.record)
+            if shared_quota is None:
+                shared_quota=transport.quota
+                from council.families import FAMILIES
+                for provider,settings in (rate_limits or {}).items():
+                    for family in FAMILIES.values():
+                        for endpoint in family.endpoints:
+                            if endpoint.provider==provider:
+                                shared_quota.configure(provider,endpoint.model,
+                                    rate_per_minute=float(settings["requests_per_minute"]),
+                                    burst=int(settings.get("burst",1)),
+                                    daily_requests=settings.get("daily_requests"),
+                                    daily_tokens=settings.get("daily_tokens"),
+                                    tokens_per_minute=settings.get("tokens_per_minute"))
+            else:
+                # Do not reset RPM, TPM, or daily reservations between
+                # adjacent evaluation tasks and baselines.
+                transport.quota=shared_quota
             rows+=await run_task(task,transport,events,deadline=deadline,
                                  baseline_samples=baseline_samples,
                                  mode=mode,paper_index=paper_index)
@@ -183,12 +202,15 @@ def main(argv=None):
     parser.add_argument("--mode",choices=("quick","full"),default="full")
     parser.add_argument("--paper-index",type=Path,
                         help="Existing local SQLite paper index, optional")
+    parser.add_argument("--config",type=Path,default=Path("council.yaml"),
+                        help="Optional config with your verified RPM/TPM caps")
     parser.add_argument("--split",choices=("dev","heldout"),default="dev")
     parser.add_argument("--max-tasks",type=int,default=3)
     parser.add_argument("--deadline",type=float,default=240)
     parser.add_argument("--baseline-samples",type=int,default=0,
                         help="0 (default) aims to match Council calls, capped at 55; explicit positive value is a smaller hard cap")
-    parser.add_argument("--out-dir",type=Path,default=Path("runs")/"eval")
+    parser.add_argument("--out-dir","--out",type=Path,
+                        default=Path("runs")/"eval")
     parser.add_argument("--confirm-free",action="store_true")
     args=parser.parse_args(argv)
     if not 1<=args.max_tasks<=100 or not 0<=args.baseline_samples<=55:
@@ -206,6 +228,10 @@ def main(argv=None):
                           "max_possible_calls_warning":upper_calls,
                           "warning":"No APIs called. Confirm free/non-billed account limits. Equal CALLS are not equal TOKENS or tool availability."},indent=2))
         return
+    rate_limits={}
+    if args.config.is_file():
+        from council.config import load_config
+        rate_limits=load_config(args.config).rate_limits
     index=None
     if args.paper_index:
         from council.verify.source import PaperIndex
@@ -214,7 +240,8 @@ def main(argv=None):
         path,rows=asyncio.run(execute(tasks,out_dir=args.out_dir,
                            deadline=args.deadline,max_tasks=args.max_tasks,
                            baseline_samples=args.baseline_samples,
-                           mode=args.mode,paper_index=index))
+                           mode=args.mode,paper_index=index,
+                           rate_limits=rate_limits))
     finally:
         if index is not None:
             index.close()
