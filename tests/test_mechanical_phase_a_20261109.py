@@ -21,6 +21,7 @@ from council.verify.sandbox import SandboxResult
 from council.schemas import validate
 from council.structured import PROPOSAL_SCHEMA
 from council.judge import normalize_topic_judgment
+from eval.code_tasks import extract_function_source,hidden_case_outcome
 from eval.generate_tasks import build
 from eval.run_eval import paired_mode_comparison
 
@@ -165,6 +166,37 @@ class QuotaTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(QuotaContention):
             await q.acquire("Groq","b",deadline=time.monotonic()+.02,
                             expected_tokens=1001)
+
+
+class HiddenCodeSandboxTests(unittest.TestCase):
+    def test_python_source_extracted_without_exec(self):
+        source="Here is the answer:\n"+chr(96)*3+"python\ndef f(xs):\n    return sum(xs)\n"+chr(96)*3
+        self.assertEqual(extract_function_source(source),
+                         "def f(xs):\n    return sum(xs)")
+        self.assertIsNone(extract_function_source("The result is 13"))
+
+    def test_hidden_examples_only_run_with_bwrap_and_are_not_selection_oracle(self):
+        from council.verify.sandbox import SandboxResult
+        cases={"cases":[{"input":[1,2],"expected":3},
+                        {"input":[],"expected":0}]}
+        source="def f(xs):\n    return sum(xs)"
+        with patch("eval.code_tasks.available",return_value=False), \
+             patch("eval.code_tasks.run_python") as execute:
+            self.assertEqual(hidden_case_outcome(source,cases),"unavailable")
+            execute.assert_not_called()
+        with patch("eval.code_tasks.available",return_value=True), \
+             patch("eval.code_tasks.run_python",
+                   return_value=SandboxResult("pass","sandbox completed")) as execute:
+            self.assertEqual(hidden_case_outcome(source,cases),"pass")
+            submitted=execute.call_args.args[0]
+            self.assertIn("def f(xs):",submitted)
+            self.assertIn("__council_cases",submitted)
+            self.assertIn("expected",submitted)
+        with patch("eval.code_tasks.available",return_value=True), \
+             patch("eval.code_tasks.run_python") as execute:
+            self.assertEqual(hidden_case_outcome("not executable",cases),
+                             "no_code")
+            execute.assert_not_called()
 
 
 class QuoteTraceTests(unittest.TestCase):
