@@ -875,6 +875,8 @@ class FullCouncilRunner(CouncilRunner):
                        "blocking":blocking,"basis":["Fewer than two independent valid proposals"],
                        "cause":"insufficient_independence"},
             "requirements":req.as_data(),"actual_models":self.actual_models,
+            "final_answer":None,  # peer-independent checks did not run
+            "candidate_answers":proposal_answers(proposals,self.ledger)[1],
             "advisory_findings":findings,"reference_checks":self.reference_checks,
             "topic_consolidation":topics,
             "audit_advisory_findings":audit_advisories,
@@ -1446,7 +1448,9 @@ class FullCouncilRunner(CouncilRunner):
         if not proposals:
             result={"research_result":ResearchResult(question,completion_status="unresolved",
                     limitations=self.warnings).to_dict(),
-                    "proposals":[],"claims":[],"warnings":self.warnings}
+                    "proposals":[],"claims":[],
+                    "final_answer":None,"candidate_answers":{},
+                    "warnings":self.warnings}
             if hasattr(self.events,"db") and hasattr(self.events,"run_id"):
                 SQLiteLedger(self.events.db).save(self.events.run_id,self.ledger)
             self.events.record("run_finished",result=result)
