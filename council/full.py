@@ -1201,6 +1201,20 @@ class FullCouncilRunner(CouncilRunner):
                 "source_anchor_missing":not bool(span)})
         payload={"question":question,"proposal_id":proposal["id"],
                  "claims":rows}
+        # Reviewer gets only the official sections attached to this
+        # proposal's claims, and at most 1.2K characters of each section.
+        # A clipped passage is explicitly labelled as partial guidance;
+        # complete references are reserved for the grounded objection judge.
+        if self.paper_index is not None:
+            refs=self._reference_for_claims(
+                proposal["claim_ids"],self._rfc_game_references(question))
+            if refs:
+                payload["reference_sections"]={
+                    section:dict(item,excerpt=str(item.get("excerpt",""))[:1200],
+                                 truncated=(bool(item.get("truncated")) or
+                                            len(str(item.get("excerpt","")))>1200),
+                                 excerpt_purpose="partial reviewer guidance")
+                    for section,item in refs.items()}
         if recheck:
             payload["review_phase"]="independent_revision_recheck"
             payload["prior_objections"]=[
