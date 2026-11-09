@@ -41,7 +41,7 @@ PROPOSAL_SCHEMA = {
         "hypotheses": STRING_LIST,
         "experiments": STRING_LIST,
     },
-    "required": ["approach", "claims", "hypotheses", "experiments"],
+    "required": ["approach", "artifact", "claims", "hypotheses", "experiments"],
     "additionalProperties": False,
 }
 
