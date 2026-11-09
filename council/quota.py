@@ -16,6 +16,7 @@ class EndpointState:
     burst: int
     daily_requests: int | None = None
     daily_tokens: int | None = None
+    tokens_per_minute: int | None = None
     remaining: float = 0
     refreshed_at: float = 0
     day: str = ""
@@ -25,8 +26,10 @@ class EndpointState:
     cooldown_until: float = 0
 
     def __post_init__(self):
-        if self.rate_per_minute <= 0 or self.burst <= 0:
-            raise ValueError("Quota rate and burst must be positive")
+        if (self.rate_per_minute <= 0 or self.burst <= 0 or
+                self.tokens_per_minute is not None
+                and self.tokens_per_minute <= 0):
+            raise ValueError("Quota rates and burst must be positive")
         self.remaining = float(self.burst)
         self.refreshed_at = time.monotonic()
         self.day = datetime.now(timezone.utc).date().isoformat()
@@ -44,12 +47,25 @@ class QuotaScheduler:
         self.shared_usage: dict[str, int] = defaultdict(int)
         self.shared_daily_tokens: dict[str,int] = {}
         self.shared_used_tokens: dict[str,int] = defaultdict(int)
+        # Actual tokens/minute allowances are account/provider-scoped,
+        # not independently refillable per model endpoint.
+        self.shared_tpm_cap: dict[str,int] = {}
+        self.shared_tpm_available: dict[str,float] = {}
+        self.shared_tpm_updated: dict[str,float] = {}
 
     def configure(self, provider: str, model: str, *, rate_per_minute: float,
                   burst: int = 1, daily_requests: int | None = None,
-                  daily_tokens: int | None = None):
+                  daily_tokens: int | None = None,
+                  tokens_per_minute: int | None = None):
         self.states[(provider, model)] = EndpointState(
-            rate_per_minute, burst, daily_requests, daily_tokens)
+            rate_per_minute, burst, daily_requests, daily_tokens,
+            tokens_per_minute)
+        if tokens_per_minute is not None:
+            if type(tokens_per_minute) is not int or tokens_per_minute <= 0:
+                raise ValueError("tokens_per_minute must be positive integer")
+            self.shared_tpm_cap[provider]=tokens_per_minute
+            self.shared_tpm_available.setdefault(provider,float(tokens_per_minute))
+            self.shared_tpm_updated.setdefault(provider,time.monotonic())
 
     def state(self, provider: str, model: str) -> EndpointState:
         return self.states.setdefault((provider, model), EndpointState(
@@ -91,8 +107,22 @@ class QuotaScheduler:
                 cooldown = max(0.0, state.cooldown_until - now)
                 wait_tokens = max(0.0, 1.0 - state.remaining) * 60 / state.rate_per_minute
                 wait = max(cooldown, wait_tokens)
+                cap=self.shared_tpm_cap.get(provider)
+                if cap is not None:
+                    if expected_tokens > cap:
+                        raise QuotaContention(
+                            "Estimated request exceeds configured provider TPM cap")
+                    last=self.shared_tpm_updated[provider]
+                    tokens=min(float(cap),
+                               self.shared_tpm_available[provider]+
+                               max(0,now-last)*cap/60.0)
+                    self.shared_tpm_available[provider]=tokens
+                    self.shared_tpm_updated[provider]=now
+                    wait=max(wait,max(0.0,expected_tokens-tokens)*60.0/cap)
                 if wait <= 0:
                     state.remaining -= 1
+                    if cap is not None:
+                        self.shared_tpm_available[provider]-=expected_tokens
                     state.requests_today += 1
                     state.tokens_today += expected_tokens
                     self.shared_usage[provider] += 1
@@ -122,6 +152,10 @@ class QuotaScheduler:
             state.tokens_today = max(0,state.tokens_today + delta)
             self.shared_used_tokens[provider] = max(0,
                 self.shared_used_tokens[provider] + delta)
+            if provider in self.shared_tpm_cap:
+                cap=self.shared_tpm_cap[provider]
+                self.shared_tpm_available[provider]=min(float(cap),
+                    max(0.,self.shared_tpm_available[provider]-delta))
         ra = retry_after_seconds(lowered.get("retry-after"))
         if ra is not None and ra > 0:
             state.cooldown_until = max(state.cooldown_until, time.monotonic() + ra)
