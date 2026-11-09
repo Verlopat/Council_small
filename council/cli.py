@@ -286,7 +286,8 @@ def main(argv=None) -> int:
                                 rate_per_minute=float(settings["requests_per_minute"]),
                                 burst=int(settings.get("burst",1)),
                                 daily_requests=settings.get("daily_requests"),
-                                daily_tokens=settings.get("daily_tokens"))
+                                daily_tokens=settings.get("daily_tokens"),
+                                tokens_per_minute=settings.get("tokens_per_minute"))
         if args.mode == "full":
             from council.full import FullCouncilRunner
             from council.requirements import Requirements
