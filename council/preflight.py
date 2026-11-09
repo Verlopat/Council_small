@@ -61,14 +61,17 @@ except OSError:
 print(json.dumps({"pass": denied}))
 """,
         "host_home_isolation": """import json, os, pathlib
+# A sandbox that creates host-home mountpoints (even for a read-only venv)
+# fails this check. No portion of /home or /root should be visible.
 home = pathlib.Path("/home")
+root = pathlib.Path("/root")
 visible = []
 if home.exists():
     try:
         visible = [p.name for p in home.iterdir()]
     except OSError:
-        visible = []
-print(json.dumps({"pass": not visible}))
+        visible = ["unreadable"]
+print(json.dumps({"pass": not visible and not root.exists()}))
 """,
         "environment_isolation": """import json, os
 print(json.dumps({"pass": not any(key.endswith("_API_KEY") or
@@ -76,9 +79,15 @@ print(json.dumps({"pass": not any(key.endswith("_API_KEY") or
     for key in os.environ)}))
 """,
     }
-    return {name: Check("pass" if (result:=run_python(source,timeout=6)).outcome == "pass"
-                         else "fail", result.detail)
-            for name, source in checks.items()}
+    report={}
+    for name,source in checks.items():
+        result=run_python(source,timeout=6)
+        passed=result.outcome=="pass"
+        reason=(result.detail if passed
+                else (name+" probe returned pass=false" if result.outcome=="fail"
+                      else result.detail))
+        report[name]=Check("pass" if passed else "fail",reason)
+    return report
 
 def main(argv=None) -> int:
     parser=argparse.ArgumentParser(description="Verify safe local Council prerequisites without API requests")
