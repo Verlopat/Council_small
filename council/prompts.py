@@ -235,7 +235,11 @@ source-text comparison, never security proof or independent verification.
 For EVERY provided version, return matches, contradicts or incomplete,
 with a brief concrete reason and an EXACT short reference_quote copied
 from the supplied excerpt whenever claiming a match or contradiction.
-No fabricated quotations. Name the best_version_id only if it is in
+No fabricated quotations. Quote ONE exact source sentence of at most
+25 words, copied character for character from the reference (including
+the exact words and inequalities). Extra harmless context such as "PPT
+adversary" or "lattice instantiation" is not inherently a contradiction;
+judge the actual quantifiers and game rules. Name the best_version_id only if it is in
 versions and its claim text is at least partially relevant; otherwise null.
 The best version need not be fully correct: list what is missing, and
 summarize the best source-aligned game in 1-3 concise sentences.
