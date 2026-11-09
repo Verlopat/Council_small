@@ -88,7 +88,9 @@ def build(*,per_kind:int=30,seed:int=20261029,split:str="dev")->list[dict]:
             "license":"original-generated","seed":seed,
             "difficulty":"edge_cases"})
 
-        u=rng.randint(1,50)
+        # Separate heldout algebra parameters so prompts cannot collide
+        # with any dev question even with matching PRNG draws.
+        u=rng.randint(1,50)+(100 if split=="heldout" else 0)
         v=rng.randint(1,40)
         false=i%10 in {1,4,7}
         # A false identity often differs by ONE in the x-coefficient:
