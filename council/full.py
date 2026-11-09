@@ -99,7 +99,9 @@ class FullCouncilRunner(CouncilRunner):
         self.extra_obligations=[]
         self.reference_checks=[]
         self._definition_context_by_claim={}
-        self._translator_unavailable=False
+        self._translators_down=set()
+        self._translator_used={}
+        self._translator_unavailable=False  # legacy diagnostic; per-family fallback remains enabled
         self.objections=[]
         self.grounded_objection_verdicts={}
         self.author_responses=[]
@@ -314,6 +316,19 @@ class FullCouncilRunner(CouncilRunner):
                     self.warnings.append(
                         dependent.id + ": dependency rejected (" + str(exc) + ")")
 
+    def _translator_candidates(self, claim: Claim) -> list[str]:
+        """Independent free-tier families in deterministic fallback order.
+
+        The judge/auditor/author cannot translate their own decisive claim.
+        A quick-mode solver may also use an eligible full-mode solver as a
+        translator, but only when the configured primary route is down.
+        """
+        order=[self.translator_family,*self.solvers,
+               "gpt-oss","command","nemotron"]
+        excluded={claim.owner_family,self.judge_family,self.auditor_family,None}
+        return [f for f in dict.fromkeys(order)
+                if f and f not in excluded]
+
     async def _translate_and_check(self,claim:Claim):
         if is_meta_claim(claim.statement):
             self.events.record("meta_claim_verification_skipped",claim_id=claim.id)
@@ -381,29 +396,34 @@ class FullCouncilRunner(CouncilRunner):
                 claim.id+": sentence provenance exists but claim-to-source "
                 "semantic alignment remains unchecked")
             return
-        if self._translator_unavailable:
-            self.extra_obligations.append(
-                claim.id+": translator unavailable after earlier failures in this run")
-            return
         if not claim.source_span:
             self.extra_obligations.append("Add an exact source span for "+claim.id)
             return
         if self.budget.debate_remaining()<=1:return
-        proposal=await self._call(self.translator_family,"translate",{
+        proposal=None
+        first_family=None
+        payload={
             "claim_id":claim.id,"claim_version":claim.version,
             "statement":claim.statement,"source_span":claim.source_span,
             "assumptions":claim.assumptions,
-            "rule":"A check must match the meaning of the claim"})
-        if not proposal:
-            # A failing role is not retried for each remaining claim in the
-            # same run: the shared free-tier family has already exhausted its
-            # eligible fallback endpoints or returned invalid output.
+            "rule":"A check must match the meaning of the claim"}
+        for family in self._translator_candidates(claim):
+            if family in self._translators_down or self.budget.debate_remaining()<=2:
+                continue
+            proposal=await self._call(family,"translate",payload)
+            if proposal is not None:
+                first_family=family
+                self._translator_used[claim.id]=family
+                self.events.record("translator_selected",claim_id=claim.id,
+                                   family=family,owner_family=claim.owner_family)
+                break
+            self._translators_down.add(family)
+            self.events.record("translator_candidate_unavailable",
+                               claim_id=claim.id,family=family)
+        if proposal is None:
             self._translator_unavailable=True
-            self.events.record("role_disabled_for_run",role="translate",
-                               family=self.translator_family,
-                               reason="initial translator failed")
             self.extra_obligations.append(
-                claim.id+": translator unavailable; independent verification deferred")
+                claim.id+": no independent translator available among eligible families")
             return
         if proposal.get("rung") is None and not proposal.get("artifact"):
             self.moderator.bus.close(claim.id, "no_evidence_possible")
@@ -441,9 +461,8 @@ class FullCouncilRunner(CouncilRunner):
         if (result.outcome == "pass" and result.kind != "arithmetic"
                 and decisive_if_supported(self.ledger, claim.id)):
             second_family = next(
-                (f for f in self.solvers
-                 if f not in {claim.owner_family, self.translator_family,
-                              self.judge_family, self.auditor_family}), None)
+                (f for f in self._translator_candidates(claim)
+                 if f != first_family and f not in self._translators_down),None)
             if second_family and self.budget.debate_remaining() > 3:
                 secondary = await self._call(second_family, "translate", {
                     "claim_id": claim.id,
@@ -465,7 +484,7 @@ class FullCouncilRunner(CouncilRunner):
                             verify, secondary_plan, secondary_artifact)
                         self.events.record(
                             "decisive_second_translation", claim_id=claim.id,
-                            first_family=self.translator_family,
+                            first_family=first_family,
                             second_family=second_family,
                             first_outcome=result.outcome,
                             second_outcome=secondary_result.outcome,
@@ -1946,6 +1965,8 @@ class FullCouncilRunner(CouncilRunner):
             "unresolved_objections_display_omitted":omitted,
             "grounded_out_of_scope_objections":out_of_scope,
             "grounded_objection_verdicts":grounded,
+            "translators_used":dict(self._translator_used),
+            "translator_families_unavailable":sorted(self._translators_down),
             "topic_consolidation":topic_consolidation,
             "reference_checks":self.reference_checks,
             "judge_source":("local_policy" if local_judge else
