@@ -263,5 +263,40 @@ class RoleAndCliPolicyTests(unittest.TestCase):
                     self.assertEqual(observed[-1]["timeout"],expected_timeout)
 
 
+class MissingAndRepeatMetricsTests(unittest.TestCase):
+    def test_missing_code_accuracy_metrics_are_not_fabricated_or_crashing(self):
+        from eval.metrics import summary
+        result=summary([
+            {"calls":3,"false_verified":None,
+             "unresolved":True,"latency":.5},
+            {"calls":5,"false_verified":None,
+             "unresolved":False,"latency":1.5}])
+        self.assertIsNone(result["false_verified"])
+        self.assertIsNone(result["no_op"])
+        self.assertEqual(result["calls"],4)
+        self.assertEqual(result["latency"],1.)
+        self.assertEqual(result["unresolved"],.5)
+
+    def test_ordinary_quick_full_pairing_preserves_repeated_rows(self):
+        from eval.run_eval import paired_mode_comparison
+        with tempfile.TemporaryDirectory() as tmp:
+            folder=Path(tmp)
+            for mode,corrects in (("quick",[0,1]),("full",[1,1])):
+                dest=folder/mode
+                dest.mkdir()
+                with (dest/"results.jsonl").open("w") as fh:
+                    for score in corrects:
+                        fh.write(json.dumps({
+                            "task_id":"repeat_me","kind":"numeric",
+                            "system":"council","mode":mode,"correct":score})+"\n")
+            result=paired_mode_comparison(folder/"quick",folder/"full")
+            overall=result["overall"]
+            self.assertEqual(overall["paired_tasks"],1)
+            self.assertEqual(overall["paired_replicate_attempts"],2)
+            self.assertEqual(overall["quick_accuracy"],.5)
+            self.assertEqual(overall["full_accuracy"],1.)
+            self.assertEqual(overall["full_minus_quick_ci"],(.5,.5,.5))
+
+
 if __name__=="__main__":
     unittest.main()
