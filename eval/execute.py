@@ -7,6 +7,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 import time
 import uuid
@@ -20,6 +21,30 @@ from council.verify.arithmetic import check
 from answer_validation import matches_expected
 from council.final_answers import extract_final_answer
 from eval.code_tasks import extract_function_source,hidden_case_outcome
+
+def canonical_vote_answer(text: str) -> str:
+    """Normalize only a terminal answer, not the semantic correctness.
+
+    Numeric 42, 42.0 and 4.2e1-like outputs should not get separate
+    self-consistency votes merely because models format them differently.
+    Boolean yes/true and no/false are also equivalent for truth tasks.
+    """
+    final=extract_final_answer(text)
+    if final is None:
+        return text.strip()
+    lower=final.casefold()
+    if lower in {"true","yes"}:
+        return "yes"
+    if lower in {"false","no"}:
+        return "no"
+    try:
+        number=Decimal(final.replace(",",""))
+        if number.is_finite():
+            return format(number.normalize(),"f")
+    except InvalidOperation:
+        pass
+    return final
+
 
 def requested_baseline_calls(council_calls: int, *, user_limit: int = 0,
                              safety_cap: int = 55) -> int:
@@ -145,7 +170,7 @@ async def run_task(task,transport,events,*,deadline,baseline_samples=0,
         # Vote on final answers rather than string-identical explanations.
         # Use raw code text for code tasks, where matching a sample integer
         # cannot establish implementation correctness.
-        vote_inputs=([extract_final_answer(answer) or answer.strip()
+        vote_inputs=([canonical_vote_answer(answer)
                       for answer in baseline_outputs]
                      if task.get("kind") in {"numeric","symbolic"}
                      else baseline_outputs)
@@ -171,13 +196,15 @@ async def run_task(task,transport,events,*,deadline,baseline_samples=0,
         if independent:
             def tool_selector(answer):
                 try:
-                    extracted=extract_final_answer(answer)
-                    if extracted is None:
+                    extracted=canonical_vote_answer(answer)
+                    proposed_decimal=Decimal(extracted)
+                    if (not proposed_decimal.is_finite() or
+                            proposed_decimal!=proposed_decimal.to_integral_value()):
                         return False,0.0
-                    proposed=int(extracted)
+                    proposed=int(proposed_decimal)
                     ok=check(independent,proposed).outcome=="pass"
                     return ok,float(ok)
-                except ValueError:
+                except (ValueError,InvalidOperation,OverflowError):
                     return False,0.0
             selected=best_of_n(baseline_outputs,tool_selector)
             best={"task_id":task["id"],"system":"best_of_n",
@@ -218,7 +245,7 @@ async def run_task(task,transport,events,*,deadline,baseline_samples=0,
         except FamilyUnavailable:
             continue
     if task.get("kind") in {"numeric","symbolic"}:
-        family_outputs={family:extract_final_answer(text) or text.strip()
+        family_outputs={family:canonical_vote_answer(text)
                         for family,text in family_outputs.items()}
     vote6=family_vote(family_outputs)
     vote_row={"task_id":task["id"],"system":"vote6",
