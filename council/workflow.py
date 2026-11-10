@@ -70,7 +70,9 @@ class CouncilRunner:
                 elif role == "proposal":
                     formatting = (
                         "Output ONE complete JSON object with nonempty approach, "
-                        "at least one anchored claim, hypotheses and experiments. "
+                        "final_answer (scalar string for numeric/yes-no tasks "
+                        "or empty string for open questions), at least one "
+                        "anchored claim, hypotheses and experiments. "
                         "Every claim needs id, statement, source_span, sentence_ids, "
                         "assumptions, limitations, depends_on and dependency_argument. "
                         "Use [S1], [S2] numbered source lines and real explanations; "
