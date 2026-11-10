@@ -1,4 +1,4 @@
-# Architecture v4 — current implementation and evidence status (2026-11-09)
+# Architecture v4 — implementation and evidence status (2026-11-10)
 
 The Appendix corrections override the older weak/strong status policy. **Checked code, a model's opinion, and an actual mathematical security proof are different forms of evidence.** A passing verifier does not automatically establish the correspondence between an English claim and its formal artifact.
 
@@ -14,9 +14,11 @@ The Appendix corrections override the older weak/strong status policy. **Checked
 | Bounded evidence, versioned ledger and debate | `council/models.py`, `council/moderator.py`, `council/ledger.py` | Offline regression tests; proof-to-English alignment and universal claims still unresolved |
 | Source-free disagreement report | `council/full.py`, `council/cli.py` | Competing claims/reviewer objections recorded, never marked proved |
 | Per-provider quota controls and pacing | `council/quota.py`, `council/transport.py`, `council/config.py` | Provider-shared TPM/RPM queue; **actual free limits must be entered by the account owner**. Unconfigured 30-RPM pacing is protective, not a provider guarantee |
-| Evaluation metrics and baselines | `eval/execute.py`, `eval/run_eval.py` | Selected accuracy distinct from verified accuracy, false-verified rate, and candidate-oracle upper bound; paired task-bootstrap CI, per-kind quick/full comparison; **no checkable-task live Phase-A results yet** |
+| Evaluation metrics and baselines | `eval/execute.py`, `eval/metrics.py`, `eval/run_eval.py`, `eval/compare_repeated_modes.py` | Selected accuracy distinguished from verified accuracy, false verification and candidate-oracle upper bound; gold-assisted best-of-N excluded from fair baselines; code scores may be ungraded. Repeats are bootstrapped by **distinct tasks**, not individual model calls. No completed independently reviewed live Phase-A evaluation yet |
 | Phase-A tasks and sandbox-only hidden code scoring | `eval/generate_tasks.py`, `eval/code_tasks.py`, `eval/tasks/phase_a_dev.jsonl`, `eval/tasks/phase_a_heldout.jsonl` | Two disjoint sets of 90 original-generated numeric/code/symbolic tasks, including 30% false symbolic identities; hidden Python cases execute only through bubblewrap and never select a baseline. Code-task accuracy is ungraded when the sandbox is unavailable |
 | Research-task evaluation and annotation | `eval/research_metrics.py`, `eval/tasks/dev_research.jsonl` | 30 development cases available, but no recorded independently scored live research evaluation |
+| Role and timeout policy | `council/assignment.py`, `council/full.py`, `council/transport.py`, `council/cli.py` | Primary translator may fall back only to permitted nonowner families, never judge/auditor; actual configured role reservation validated. Explicit --timeout caps a request; unset --deadline inherits YAML default |
+| Repeated experiment isolation | `scripts/benchmark_vrf_modes.sh`, `scripts/benchmark_phase_a_modes.sh`, `eval/run_manifest.py` | A run directory is bound to Git revision, input hashes and settings; completed results are never overwritten, and interruption leaves inspectable partial files |
 | Replay, structured events, SQLite | `council/events.py`, `council/replay.py` | Offline tests; full interruption/resume recovery still needs real testing |
 
 ## Mandatory local prerequisite
@@ -49,5 +51,5 @@ For research evaluations, complete blinded human annotations using `eval/researc
 2. Passing a bounded local checker proves only its declared scope, not an unrestricted theorem or an RFC security property.
 3. Exact RFC quotation matching is retained rather than approximate semantic matching that could accidentally normalize away critical quantifiers.
 4. Review claims and objections remain audit-visible, including unjudged or quote-rejected items.
-5. No live provider-backed Phase-A, research evaluation, or local bwrap preflight has been run by the assistant.
-6. The historical core regression suite and automated GitHub Actions tests are present again on `main`; prior text claiming they were removed was stale.
+5. User's local Phase-A evaluation attempt crashed while grading an empty vote; this is regression-protected, but a complete live comparison has **not** been demonstrated. The assistant has not run live provider-backed Phase-A or an actual user-machine sandbox preflight.
+6. The historical regression suite and GitHub Actions checks are present on `main` and run on Python 3.12 and 3.14, including compilation and Bash syntax checks. Passing tests do not certify live provider behavior.
