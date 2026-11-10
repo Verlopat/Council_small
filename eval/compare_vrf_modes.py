@@ -121,7 +121,9 @@ def ensure_scores(path:Path, runs:list[dict]) -> dict[tuple[str,int,str],float]:
         with path.open("w",newline="",encoding="utf-8") as dest:
             writer=csv.DictWriter(dest,fieldnames=FIELDS)
             writer.writeheader()
-            for key in sorted(all_rows):
+            for key in sorted(all_rows,
+                              key=lambda k:((0 if k[0]=="quick" else 1),
+                                            k[1],GAMES.index(k[2]))):
                 writer.writerow(all_rows[key])
     return existing
 
