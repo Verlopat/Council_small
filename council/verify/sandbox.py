@@ -32,7 +32,8 @@ def _limits():
     for name, value in limits:
         resource.setrlimit(name, (value, value))
 
-def run_python(code: str, *, timeout: float = 10.0) -> SandboxResult:
+def run_python(code: str, *, timeout: float = 10.0,
+               expect_pass_json: bool = True) -> SandboxResult:
     if not isinstance(code, str) or len(code.encode("utf-8")) > 131072:
         return SandboxResult("error", "checker_too_large")
     if not available():
@@ -91,6 +92,12 @@ def run_python(code: str, *, timeout: float = 10.0) -> SandboxResult:
         if proc.returncode:
             return SandboxResult("error", "sandbox process failed", proc.stdout[-1600:],
                                  proc.stderr[-1600:], proc.returncode)
+        if not expect_pass_json:
+            # Raw output is still executed only in the same fail-closed bwrap.
+            # stdout is bounded and never interpreted as trusted proof.
+            return SandboxResult("ok","sandbox completed",
+                                 proc.stdout[-1600:],proc.stderr[-1600:],
+                                 proc.returncode)
         try:
             answer = json.loads(proc.stdout.strip().splitlines()[-1])
             if not isinstance(answer, dict) or type(answer.get("pass")) is not bool:
