@@ -235,5 +235,55 @@ class TranslationPriorityTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(sent),1)
 
 
+class ReviewerAndFallbackTests(unittest.IsolatedAsyncioTestCase):
+    async def test_reviewer_label_removed_but_provenance_still_checked(self):
+        with TemporaryDirectory() as d, EventStore(Path(d),"rival") as events:
+            r=runner(events)
+            source="[S1] Do arithmetic.\n[S2] Trusted uniqueness assumes honest keys."
+            owner={"id":"p1","family":"gpt-oss","approach":source,
+                   "answer":source,"claim_ids":[],
+                   "claim_sentence_ids":{}}
+            async def extract(family,role,payload,**kwargs):
+                return {"claims":[{
+                    "id":"c1",
+                    "statement":"[S2] Trusted uniqueness assumes honest keys.",
+                    "source_span":"Trusted uniqueness assumes honest keys.",
+                    "assumptions":[],"depends_on":[]}]}
+            r._call=extract
+            await r._extract_rival(owner,"command")
+            own=[c for c in r.ledger.claims.values()
+                 if c.id.startswith("p1:r")]
+            self.assertEqual(len(own),1)
+            self.assertEqual(own[0].statement,
+                             "Trusted uniqueness assumes honest keys.")
+
+    async def test_fallback_explicit_label_creates_answer_claim(self):
+        with TemporaryDirectory() as d, EventStore(Path(d),"fallback") as events:
+            r=runner(events)
+            p=r._proposal("gpt-oss",proposal_body(""),1)
+            p["approach"]="[S1] 98*7+2 gives an integer.\nFinal answer: 688"
+            r._register_answer_claim(p,"What is 98*7+2?")
+            self.assertEqual(p["final_answer"],"688")
+            self.assertIn("p1:answer",r.ledger.claims)
+
+    async def test_author_code_disagreement_prevents_verification(self):
+        with TemporaryDirectory() as d, EventStore(Path(d),"conflict") as events:
+            r=runner(events)
+            p=r._proposal("gpt-oss",proposal_body("688"),1)
+            p["artifact"]={"kind":"python","code":"print(689)",
+                           "valid_examples":[],"invalid_examples":[]}
+            r._register_answer_claim(p,"What is 98*7+2?")
+            claim=r.ledger.claims[p["answer_claim_id"]]
+            r.ledger.attach(Evidence("e1",claim.id,1,EvidenceKind.TEST,"pass",
+                                     "98*7+2","h",independently_checked=True))
+            self.assertEqual(proposal_answers([p],r.ledger)[0],"688")
+            with patch("council.verify.author_check.run_python",
+                       return_value=SandboxResult(
+                           "ok","sandbox completed",stdout="689\n")):
+                await r._run_author_artifact(p)
+            self.assertTrue(p["author_inconsistency"])
+            self.assertIsNone(proposal_answers([p],r.ledger)[0])
+
+
 if __name__=="__main__":
     unittest.main()
