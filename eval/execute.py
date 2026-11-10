@@ -61,7 +61,7 @@ def requested_baseline_calls(council_calls: int, *, user_limit: int = 0,
 
 async def run_task(task,transport,events,*,deadline,baseline_samples=0,
                    mode="full",paper_index=None,run_baselines=True,
-                   runner_config=None):
+                   runner_config=None,skip_vote6=False):
     q=task["prompt"]
     budget=RunBudget.start(deadline,reserve=min(15.,deadline/4))
     initial=time.monotonic()
@@ -239,6 +239,18 @@ async def run_task(task,transport,events,*,deadline,baseline_samples=0,
                   "correct":None}
             output_base.append(best)
     else:output_base=[]
+    # Six-family voting is expensive on free-tier accounts. It can be
+    # disabled independently of 1-model/self-consistency baselines.
+    if skip_vote6:
+        if task.get("kind")=="code" and isinstance(task.get("hidden_spec"),dict):
+            for row in output_base:
+                hidden=await asyncio.to_thread(
+                    hidden_case_outcome,row.get("answer"),task["hidden_spec"])
+                row["code_hidden_outcome"]=hidden
+                row["sample_correct"]=row.get("correct")
+                row["correct"]=(None if hidden=="unavailable"
+                                else int(hidden=="pass"))
+        return [output]+output_base
     # Plain cross-family voting is a distinct control from repeated gpt-oss.
     # Six families are required; a provider endpoint never gets an extra vote.
     family_outputs={}
@@ -276,7 +288,7 @@ async def run_task(task,transport,events,*,deadline,baseline_samples=0,
 async def execute(tasks,*,out_dir:Path,deadline:float,max_tasks:int,
                   baseline_samples:int,mode:str="full",paper_index=None,
                   rate_limits:dict|None=None,run_baselines=True,
-                  runner_config=None):
+                  runner_config=None,skip_vote6=False):
     out_dir.mkdir(parents=True,exist_ok=True)
     dest=out_dir/"results.jsonl"
     partial=out_dir/"results.partial.jsonl"
@@ -314,7 +326,8 @@ async def execute(tasks,*,out_dir:Path,deadline:float,max_tasks:int,
                                  baseline_samples=baseline_samples,
                                  mode=mode,paper_index=paper_index,
                                  run_baselines=run_baselines,
-                                 runner_config=runner_config)
+                                 runner_config=runner_config,
+                                 skip_vote6=skip_vote6)
             rows.extend(fresh)
             for row in fresh:
                 checkpoint.write(json.dumps(row,ensure_ascii=False)+"\n")
@@ -338,6 +351,8 @@ def main(argv=None):
     parser.add_argument("--deadline",type=float,default=240)
     parser.add_argument("--no-baselines",action="store_true",
                         help="Run only Council, without self-consistency or six-family API calls")
+    parser.add_argument("--skip-vote6",action="store_true",
+                        help="Keep single-model and self-consistency baselines without six-family API calls")
     parser.add_argument("--baseline-samples",type=int,default=0,
                         help="0 (default) aims to match Council calls, capped at 55; explicit positive value is a smaller hard cap")
     parser.add_argument("--out-dir","--out",type=Path,
@@ -353,7 +368,8 @@ def main(argv=None):
     if args.paper_index and not args.paper_index.is_file():
         parser.error("--paper-index must point to an existing SQLite index")
     upper_calls=args.max_tasks*(
-        55 if args.no_baselines else 55+(args.baseline_samples or 55)+6)
+        55 if args.no_baselines else
+        55+(args.baseline_samples or 55)+(0 if args.skip_vote6 else 6))
     if not args.confirm_free:
         print(json.dumps({"mode":"plan_only","tasks":min(len(tasks),args.max_tasks),
                           "per_task_deadline":args.deadline,
@@ -392,7 +408,8 @@ def main(argv=None):
                            mode=args.mode,paper_index=index,
                            rate_limits=rate_limits,
                            run_baselines=not args.no_baselines,
-                           runner_config=cfg))
+                           runner_config=cfg,
+                           skip_vote6=args.skip_vote6))
     finally:
         if index is not None:
             index.close()
