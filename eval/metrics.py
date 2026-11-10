@@ -11,7 +11,13 @@ def bootstrap_ci(deltas,n=10000,alpha=.05,seed=0):
 def paired_deltas(rows,challenger="council",baseline="best_of_n",metric="correct"):
     values=defaultdict(lambda:defaultdict(list))
     for row in rows:
-        if row.get("system") in {challenger,baseline} and row.get("equal_budget",True):
+        # Oracle-assisted baseline selection and unavailable sandbox grades
+        # are NOT fair paired accuracy measurements.
+        if (row.get("system") in {challenger,baseline}
+                and row.get("equal_budget",True)
+                and not row.get("oracle_assisted",False)
+                and row.get("comparison_eligible",True)
+                and row.get(metric) is not None):
             values[row["task_id"]][row["system"]].append(float(row[metric]))
     return [statistics.fmean(x[challenger])-statistics.fmean(x[baseline])
             for task,x in sorted(values.items()) if x[challenger] and x[baseline]]
