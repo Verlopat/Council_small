@@ -23,8 +23,10 @@ AUDITOR = "glm"
 
 class CouncilRunner:
     def __init__(self, transport, events, budget: RunBudget, *,
-                 solvers: tuple[str, ...] = DEFAULT_SOLVERS):
-        validate_assignment(solvers, JUDGE, AUDITOR)
+                 solvers: tuple[str, ...] = DEFAULT_SOLVERS,
+                 judge_family: str = JUDGE,
+                 auditor_family: str | None = AUDITOR):
+        validate_assignment(solvers, judge_family, auditor_family)
         self.transport = transport
         self.events = events
         self.budget = budget
