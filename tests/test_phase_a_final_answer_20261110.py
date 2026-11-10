@@ -285,5 +285,61 @@ class ReviewerAndFallbackTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(proposal_answers([p],r.ledger)[0])
 
 
+class ScoringAndCodeArtifactTests(unittest.TestCase):
+    def test_match_expected_accepts_inline_labeled_scalar_and_rejects_prose(self):
+        from answer_validation import matches_expected
+        self.assertTrue(matches_expected(
+            "[S1] Expanded. [S2] They are identical. Final answer: yes","yes"))
+        self.assertTrue(matches_expected(
+            "Total is 107; Final answer: 106","106"))
+        self.assertFalse(matches_expected(
+            "There are 106 units, but I did not compute the final answer","106"))
+        self.assertFalse(matches_expected(
+            "[S1] Difference is nonzero. Final answer: no","yes"))
+
+    def test_answer_claim_cannot_certify_unrelated_reported_final_answer(self):
+        ledger=ClaimLedger()
+        c=Claim("p1:answer",1,"98*7+2 = 688","gpt-oss")
+        ledger.add_claim(c)
+        ledger.attach(Evidence("e1",c.id,1,EvidenceKind.TEST,"pass",
+                               "98*7+2","hash",independently_checked=True))
+        p={"id":"p1","family":"gpt-oss","final_answer":"689",
+           "answer_claim_id":c.id,"claim_ids":[c.id]}
+        self.assertIsNone(proposal_answers([p],ledger)[0])
+
+    def test_code_task_prefers_function_from_proposal_artifact(self):
+        from eval.execute import run_task
+        class DummyCouncil:
+            def __init__(self,*args,**kwargs):
+                pass
+            async def run(self,*args,**kwargs):
+                return {"research_result":{"completion_status":"partial"},
+                        "candidate_answers":{"p1":"3"},"final_answer":None,
+                        "verdict":{"status":"unresolved"},
+                        "composition":{"outcome":"unchecked"},
+                        "proposals":[{
+                            "id":"p1","approach":"[S1] Here is the code.",
+                            "answer":"Final answer: 3",
+                            "artifact":{"code":"def f(xs):\n    return sum(xs)"}}]}
+        class FakeEvents:
+            def replay(self):
+                return []
+        async def act():
+            with patch("eval.execute.FullCouncilRunner",DummyCouncil), \
+                 patch("eval.execute.hidden_case_outcome",
+                       return_value="pass") as hidden:
+                rows=await run_task(
+                    {"id":"code","kind":"code","prompt":"Implement f(xs)",
+                     "expected":"3",
+                     "hidden_spec":{"cases":[{"input":[1,2],"expected":3}]}},
+                    object(),FakeEvents(),deadline=30,run_baselines=False)
+            return rows,hidden.call_args
+        rows,called=asyncio.run(act())
+        self.assertEqual(rows[0]["correct"],1)
+        self.assertIn("def f(xs):",called.args[0])
+        self.assertEqual(rows[0]["code_hidden_outcome"],"pass")
+        self.assertEqual(rows[0]["verified"],0)
+
+
 if __name__=="__main__":
     unittest.main()
