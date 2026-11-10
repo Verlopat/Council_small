@@ -32,7 +32,7 @@ from council.translate import plan, decisive_if_supported
 from council.verify.ladder import verify
 from council.compose import compose_answer
 from council.workflow import CouncilRunner
-from council.final_answers import proposal_answers, extract_final_answer
+from council.final_answers import proposal_answers, extract_final_answer, normalize_answer
 from council.requirements import Requirements
 from council.vrf_sanity import scan_vrf_games, unsupported_full_sk_secrecy
 from council.vrf_audit import (scan_audit_issues, objection_conflicts,
@@ -321,6 +321,40 @@ class FullCouncilRunner(CouncilRunner):
                     self.warnings.append(
                         dependent.id + ": dependency rejected (" + str(exc) + ")")
 
+    def _register_answer_claim(self,p:dict,question:str) -> None:
+        """Add a separately checkable answer without trusting a self-test.
+
+        Only literal arithmetic directly spelled out in the USER question
+        can be aligned mechanically. Word problems and yes/no judgments
+        remain unaligned even when a translator evaluates some expression.
+        """
+        final=normalize_answer(p.get("final_answer"))
+        if final is None:
+            return
+        aid=p["id"]+":answer"
+        statement="Reported final scalar result: "+final
+        source_span=question
+        unaligned=True
+        direct=re.fullmatch(
+            r"(?is)\\s*(?:what\\s+is|compute|calculate|evaluate)\\s+"
+            r"([0-9\\s+*/()%-]+)\\s*\\??\\s*",question)
+        if direct and re.fullmatch(r"[+-]?\\d+",final):
+            expression=direct.group(1).strip()
+            if expression and len(expression)<250:
+                statement=expression+" = "+final
+                source_span=expression
+                unaligned=False
+        claim=Claim(aid,1,statement,p["family"],
+                    source_span=source_span,
+                    needs_re_evaluation=unaligned)
+        self.ledger.add_claim(claim)
+        p["answer_claim_id"]=aid
+        p["claim_ids"].append(aid)
+        self.events.record("answer_claim_registered",
+                           claim_id=aid,final_answer=final,
+                           source_aligned=not unaligned,
+                           policy="literal_question_expression_only")
+
     async def _run_author_artifact(self, proposal:dict) -> None:
         """Optional author check; bwrap only, never independent claim evidence.
 
@@ -334,10 +368,11 @@ class FullCouncilRunner(CouncilRunner):
         ids=proposal.get("claim_ids",[])
         if not ids or not isinstance(code,str) or not code.strip():
             return
-        claim=self.ledger.claims.get(ids[0])
+        claim=self.ledger.claims.get(proposal.get("answer_claim_id") or ids[0])
         if claim is None:return
         import hashlib
         from council.verify.sandbox import run_python
+        from council.verify.author_check import recompute_answer
         from council.verify.python_exec import CheckSpecification,evaluate_spec
         valid=data.get("valid_examples") or []
         invalid=data.get("invalid_examples") or []
@@ -345,8 +380,14 @@ class FullCouncilRunner(CouncilRunner):
                            and bool(valid) and bool(invalid)
                            and all(isinstance(v,str) for v in valid+invalid)
                            and len(valid)<=4 and len(invalid)<=4)
+        final=normalize_answer(proposal.get("final_answer"))
+        recomputed=final is not None
         try:
-            if mutation_requested:
+            if recomputed:
+                outcome,detail=await asyncio.to_thread(
+                    recompute_answer,code,final,timeout=6)
+                mutated=False
+            elif mutation_requested:
                 spec=CheckSpecification(
                     statement=claim.statement,code=code,
                     valid_examples=tuple(valid),invalid_examples=tuple(invalid),
@@ -370,16 +411,20 @@ class FullCouncilRunner(CouncilRunner):
                     scope="Author-written check: "+claim.id+
                           "; no independent correspondence to claim",
                     artifact_hash=digest,independently_checked=False,
-                    checker_kind="author_python")
+                    checker_kind="author_recompute" if recomputed else "author_python")
         self.ledger.attach(ev)
         self.events.record("author_artifact_checked",
                            proposal_id=proposal["id"],claim_id=claim.id,
                            outcome=outcome,detail=detail,
-                           mutation_tested=mutation_requested,
+                           mutation_tested=mutation_requested and not recomputed,
                            discriminating=mutated,
+                           author_answer_consistency=recomputed,
                            independently_checked=False)
         self.extra_obligations.append(claim.id+
             ": author-written check is not independent evidence")
+        if recomputed and outcome=="fail":
+            self.extra_obligations.append(
+                claim.id+": author's Python output contradicts its final_answer")
 
     def _translator_candidates(self, claim: Claim) -> list[str]:
         """Independent free-tier families in deterministic fallback order.
@@ -394,7 +439,7 @@ class FullCouncilRunner(CouncilRunner):
         return list(self.assignment.translator_candidates(claim.owner_family))
 
     async def _translate_and_check(self,claim:Claim):
-        if is_meta_claim(claim.statement):
+        if not claim.id.endswith(":answer") and is_meta_claim(claim.statement):
             self.events.record("meta_claim_verification_skipped",claim_id=claim.id)
             self.extra_obligations.append(
                 claim.id+": statement is about the answer, not the research question")
@@ -457,9 +502,8 @@ class FullCouncilRunner(CouncilRunner):
             return
         if claim.needs_re_evaluation:
             self.extra_obligations.append(
-                claim.id+": sentence provenance exists but claim-to-source "
-                "semantic alignment remains unchecked")
-            return
+                claim.id+": rewritten claim; independent check tests only "
+                "the stated expression, not its alignment to the source")
         if not claim.source_span:
             self.extra_obligations.append("Add an exact source span for "+claim.id)
             return
@@ -471,7 +515,14 @@ class FullCouncilRunner(CouncilRunner):
             "statement":claim.statement,"source_span":claim.source_span,
             "assumptions":claim.assumptions,
             "rule":"A check must match the meaning of the claim"}
+        if claim.id.endswith(":answer"):
+            payload["question"]=question
+            payload["claimed_final_answer"]=claim.statement
         for family in self._translator_candidates(claim):
+            if getattr(self,"_active_mode","full")=="quick":
+                if getattr(self,"_quick_translation_calls",0)>=1:
+                    break
+                self._quick_translation_calls+=1
             if family in self._translators_down or self.budget.debate_remaining()<=2:
                 continue
             proposal=await self._call(family,"translate",payload)
@@ -569,8 +620,9 @@ class FullCouncilRunner(CouncilRunner):
         evidence_kind=(EvidenceKind.SOURCE if result.kind=="quote_exists"
                        else EvidenceKind.FORMAL_PROOF if result.kind=="formal_proof"
                        else EvidenceKind.TEST)
-        independent=(result.kind=="arithmetic" and
-                     self._literal_arithmetic_alignment(claim.statement,artifact))
+        independent=(result.kind=="arithmetic"
+                     and not claim.needs_re_evaluation
+                     and self._literal_arithmetic_alignment(claim.statement,artifact))
         if evidence_kind is EvidenceKind.SOURCE:
             independent=False
             document_id=artifact.get("document_id")
@@ -614,8 +666,10 @@ class FullCouncilRunner(CouncilRunner):
     def _literal_arithmetic_alignment(statement,artifact):
         import re
         match=re.fullmatch(r"\s*([^=]+)\s*=\s*([+-]?\d+)\s*",statement)
-        return (bool(match) and match.group(1).strip()==str(artifact.get("expression","")).strip()
-                and str(artifact.get("expected"))==match.group(2))
+        expected=artifact.get("expected",artifact.get("expected_int"))
+        return (bool(match)
+                and match.group(1).strip()==str(artifact.get("expression","")).strip()
+                and str(expected).replace(",","")==match.group(2))
 
     def _missing_solver_actions(self,proposals:list[dict])->list[str]:
         present={p["family"] for p in proposals}
@@ -1261,7 +1315,8 @@ class FullCouncilRunner(CouncilRunner):
         except OutputError:return
         for entry in raws[:self.max_claims]:
             try:
-                statement=require_string(entry,"statement")
+                statement=re.sub(r"^\\s*\\[(?:S|R)\\d+\\]\\s*", "",
+                                 require_string(entry,"statement"))
                 if is_meta_claim(statement):
                     self.events.record("rival_meta_claim_skipped",
                         proposal_id=owner["id"],statement_prefix=statement[:90])
@@ -1386,6 +1441,8 @@ class FullCouncilRunner(CouncilRunner):
             raise ValueError("Question required")
         req=self.requirements or Requirements(question)
         self._current_question=question
+        self._active_mode=mode
+        self._quick_translation_calls=0
         self.events.record("run_started",question=question,mode=mode,
             pipeline="evidence",
             requirements=req.as_data(),role_assignment=asdict(self.assignment),
@@ -1431,6 +1488,7 @@ class FullCouncilRunner(CouncilRunner):
             try:
                 p=self._proposal(family,body,index)
                 self._anchors(p,body)
+                self._register_answer_claim(p,question)
                 self._register_declared_dependencies(p,body)
                 p["answer"]=body.get("answer") if isinstance(body.get("answer"),str) else p["approach"]
             except (OutputError,ValueError):
@@ -1597,7 +1655,14 @@ class FullCouncilRunner(CouncilRunner):
                     self.warnings.append("Revision review invalid for "+p["id"])
             else:
                 self.warnings.append("Independent revision recheck unavailable for "+p["id"])
-        for claim in list(self.ledger.claims.values())[:self.max_claims]:
+        claims=list(self.ledger.claims.values())
+        if mode=="quick":
+            claims=sorted(claims,
+                          key=lambda c:(not c.id.endswith(":answer"),c.id))[:1]
+        else:
+            claims=sorted(claims,
+                          key=lambda c:(not c.id.endswith(":answer"),c.id))[:self.max_claims]
+        for claim in claims:
             if self.budget.debate_remaining()<1:break
             await self._translate_and_check(claim)
         # Adaptive seeds are permitted only after verification characteristics are known.
