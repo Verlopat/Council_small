@@ -298,5 +298,47 @@ class MissingAndRepeatMetricsTests(unittest.TestCase):
             self.assertEqual(overall["full_minus_quick_ci"],(.5,.5,.5))
 
 
+class CheckpointAndVoteTests(unittest.TestCase):
+    def test_canonical_votes_do_not_split_equivalent_numeric_answers(self):
+        from eval.execute import canonical_vote_answer
+        self.assertEqual(canonical_vote_answer("Final answer: 42.0"),"42")
+        self.assertEqual(canonical_vote_answer("Answer: 42"),"42")
+        self.assertEqual(canonical_vote_answer("Answer: true"),"yes")
+        self.assertEqual(canonical_vote_answer("Final answer: no"),"no")
+        self.assertNotEqual(canonical_vote_answer("Answer: no"),"yes")
+
+    def test_checkpoint_protects_existing_results_before_api_calls(self):
+        from eval.execute import execute
+        with tempfile.TemporaryDirectory() as td:
+            folder=Path(td)
+            prior=folder/"results.jsonl"
+            prior.write_text('{"old":"valuable"}\n')
+            async def attempt():
+                await execute([{"id":"t1","prompt":"Answer 42"}],
+                              out_dir=folder,deadline=10,
+                              max_tasks=1,baseline_samples=0,
+                              run_baselines=False)
+            with patch("eval.execute.FamilyTransport") as transport:
+                with self.assertRaises(FileExistsError):
+                    asyncio.run(attempt())
+                transport.assert_not_called()
+            self.assertEqual(prior.read_text(),'{"old":"valuable"}\n')
+
+    def test_interrupted_partial_results_cannot_be_overwritten(self):
+        from eval.execute import execute
+        with tempfile.TemporaryDirectory() as td:
+            folder=Path(td)
+            partial=folder/"results.partial.jsonl"
+            partial.write_text('{"partial":"valuable"}\n')
+            async def attempt():
+                await execute([{"id":"t1","prompt":"Answer 42"}],
+                              out_dir=folder,deadline=10,
+                              max_tasks=1,baseline_samples=0,
+                              run_baselines=False)
+            with self.assertRaises(FileExistsError):
+                asyncio.run(attempt())
+            self.assertIn("valuable",partial.read_text())
+
+
 if __name__=="__main__":
     unittest.main()
