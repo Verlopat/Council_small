@@ -35,14 +35,34 @@ def requested_baseline_calls(council_calls: int, *, user_limit: int = 0,
 
 
 async def run_task(task,transport,events,*,deadline,baseline_samples=0,
-                   mode="full",paper_index=None):
+                   mode="full",paper_index=None,run_baselines=True,
+                   runner_config=None):
     q=task["prompt"]
     budget=RunBudget.start(deadline,reserve=min(15.,deadline/4))
     initial=time.monotonic()
+    cfg=runner_config
     if mode=="full":
-        runner=FullCouncilRunner(transport,events,budget,paper_index=paper_index)
+        options=(dict(solvers=cfg.solvers,max_claims=cfg.max_claims,
+                      hunter_cap=cfg.hunter_cap,
+                      translator_family=cfg.translator,
+                      judge_family=cfg.judge,auditor_family=cfg.auditor,
+                      enable_coverage=cfg.optional.get("coverage_llm",True),
+                      enable_relevance=cfg.optional.get("relevance_check",False),
+                      critics=tuple(cfg.optional.get("critics",())),
+                      adaptive_seeds=cfg.optional.get("adaptive_seeds",False),
+                      enable_repairs=cfg.optional.get("repair_round",True),
+                      caps=cfg.caps,solver_strategies=cfg.solver_strategies)
+                 if cfg is not None else {})
+        runner=FullCouncilRunner(transport,events,budget,
+                                 paper_index=paper_index,**options)
     elif mode=="quick":
-        runner=QuickCouncilRunner(transport,events,budget,paper_index=paper_index)
+        options=(dict(solver=cfg.solvers[0],
+                      translator_family=cfg.translator,
+                      judge_family=cfg.judge,
+                      solver_strategies=cfg.solver_strategies)
+                 if cfg is not None else {})
+        runner=QuickCouncilRunner(transport,events,budget,
+                                  paper_index=paper_index,**options)
     else:
         raise ValueError("mode must be quick or full")
     council=(await runner.run(q,mode="quick") if mode=="quick"
@@ -102,6 +122,11 @@ async def run_task(task,transport,events,*,deadline,baseline_samples=0,
         # The candidate-oracle figure comes from sample outputs, not hidden
         # code correctness. Do not compare it against code baselines.
         output["correct_candidate"]=None
+    if not run_baselines:
+        output["baseline_target_calls"]=0
+        output["comparison_basis"]=(
+            "Two modes compared on the same task; no model baseline was run")
+        return [output]
     baseline_outputs=[]
     baseline_budget=RunBudget.start(deadline,reserve=0)
     target_samples = requested_baseline_calls(
@@ -117,7 +142,14 @@ async def run_task(task,transport,events,*,deadline,baseline_samples=0,
         except FamilyUnavailable:
             break
     if baseline_outputs:
-        vote=majority(baseline_outputs)
+        # Vote on final answers rather than string-identical explanations.
+        # Use raw code text for code tasks, where matching a sample integer
+        # cannot establish implementation correctness.
+        vote_inputs=([extract_final_answer(answer) or answer.strip()
+                      for answer in baseline_outputs]
+                     if task.get("kind") in {"numeric","symbolic"}
+                     else baseline_outputs)
+        vote=majority(vote_inputs)
         base={"task_id":task["id"],"system":"self_consistency",
               "answer":vote.answer,"calls":len(baseline_outputs),
               "equal_budget":len(baseline_outputs)==model_calls,
@@ -139,7 +171,10 @@ async def run_task(task,transport,events,*,deadline,baseline_samples=0,
         if independent:
             def tool_selector(answer):
                 try:
-                    proposed=int(answer.strip())
+                    extracted=extract_final_answer(answer)
+                    if extracted is None:
+                        return False,0.0
+                    proposed=int(extracted)
                     ok=check(independent,proposed).outcome=="pass"
                     return ok,float(ok)
                 except ValueError:
@@ -148,6 +183,8 @@ async def run_task(task,transport,events,*,deadline,baseline_samples=0,
             best={"task_id":task["id"],"system":"best_of_n",
                   "answer":selected.answer,"calls":len(baseline_outputs),
                   "equal_budget":len(baseline_outputs)==model_calls,
+                  "oracle_assisted":True,
+                  "comparison_eligible":False,
                   "unresolved":selected.answer is None}
             if "expected" in task:
                 best["correct"]=int(matches_expected(str(selected.answer or ""),
@@ -180,6 +217,9 @@ async def run_task(task,transport,events,*,deadline,baseline_samples=0,
             family_outputs[family]=answer.text
         except FamilyUnavailable:
             continue
+    if task.get("kind") in {"numeric","symbolic"}:
+        family_outputs={family:extract_final_answer(text) or text.strip()
+                        for family,text in family_outputs.items()}
     vote6=family_vote(family_outputs)
     vote_row={"task_id":task["id"],"system":"vote6",
               "answer":vote6.answer,"calls":vote6.calls,
@@ -200,7 +240,8 @@ async def run_task(task,transport,events,*,deadline,baseline_samples=0,
 
 async def execute(tasks,*,out_dir:Path,deadline:float,max_tasks:int,
                   baseline_samples:int,mode:str="full",paper_index=None,
-                  rate_limits:dict|None=None):
+                  rate_limits:dict|None=None,run_baselines=True,
+                  runner_config=None):
     out_dir.mkdir(parents=True,exist_ok=True)
     rows=[]
     shared_quota=None
@@ -227,7 +268,9 @@ async def execute(tasks,*,out_dir:Path,deadline:float,max_tasks:int,
                 transport.quota=shared_quota
             rows+=await run_task(task,transport,events,deadline=deadline,
                                  baseline_samples=baseline_samples,
-                                 mode=mode,paper_index=paper_index)
+                                 mode=mode,paper_index=paper_index,
+                                 run_baselines=run_baselines,
+                                 runner_config=runner_config)
     dest=out_dir/"results.jsonl"
     with dest.open("w",encoding="utf-8") as fh:
         for row in rows:
@@ -248,6 +291,8 @@ def main(argv=None):
     parser.add_argument("--split",choices=("dev","heldout"),default="dev")
     parser.add_argument("--max-tasks",type=int,default=3)
     parser.add_argument("--deadline",type=float,default=240)
+    parser.add_argument("--no-baselines",action="store_true",
+                        help="Run only Council, without self-consistency or six-family API calls")
     parser.add_argument("--baseline-samples",type=int,default=0,
                         help="0 (default) aims to match Council calls, capped at 55; explicit positive value is a smaller hard cap")
     parser.add_argument("--out-dir","--out",type=Path,
@@ -282,10 +327,14 @@ def main(argv=None):
         parser.error("Sandbox preflight failed ("+", ".join(failed)+
                      "); no provider calls started. Run "
                      "'python -m council.preflight --json' and fix isolation.")
+    cfg=None
     rate_limits={}
     if args.config.is_file():
         from council.config import load_config
-        rate_limits=load_config(args.config).rate_limits
+        cfg=load_config(args.config)
+        rate_limits=cfg.rate_limits
+    if args.mode=="quick" and cfg is not None and not cfg.solvers:
+        parser.error("Quick mode requires a configured solver")
     index=None
     if args.paper_index:
         from council.verify.source import PaperIndex
@@ -295,7 +344,9 @@ def main(argv=None):
                            deadline=args.deadline,max_tasks=args.max_tasks,
                            baseline_samples=args.baseline_samples,
                            mode=args.mode,paper_index=index,
-                           rate_limits=rate_limits))
+                           rate_limits=rate_limits,
+                           run_baselines=not args.no_baselines,
+                           runner_config=cfg))
     finally:
         if index is not None:
             index.close()
