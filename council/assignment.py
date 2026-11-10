@@ -1,4 +1,8 @@
-"""Role reservations are immutable within a run, including during fallback."""
+"""Independent role allocation with reserved judges/auditors.
+
+A translator may be replaced by an explicitly eligible independent family
+after primary failure; endpoint fallback within a family remains distinct.
+"""
 from __future__ import annotations
 from dataclasses import dataclass
 from council.families import FAMILIES
@@ -43,8 +47,20 @@ class Assignment:
         if role == "auditor":
             return family == self.auditor and family != self.judge
         if role == "translator":
-            return family == self.translator
+            # An independent verifier translator can be another nonowner
+            # solver after the primary is unavailable. Never reuse the
+            # judge or auditor even when the old family list permits it.
+            return (family in {*self.solvers,self.translator,
+                               "gpt-oss","command","nemotron"}
+                    and family != self.auditor)
         return family != self.judge
+
+    def translator_candidates(self, claim_owner: str) -> tuple[str, ...]:
+        """Ordered, role-approved independent translator fallbacks."""
+        order=(self.translator,*self.solvers,
+               "gpt-oss","command","nemotron")
+        return tuple(f for f in dict.fromkeys(order)
+                     if self.allowed("translator",f,claim_owner=claim_owner))
 
     def fallback(self, family: str):
         """Only same-family endpoints; never silently substitute a paid/different lineage."""
