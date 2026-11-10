@@ -56,6 +56,7 @@ class ProposedClaim(ModelSchema):
 class Proposal(ModelSchema):
     approach:str=Field(min_length=1)
     answer:str|None=None
+    final_answer:str=Field(default="")
     artifact:dict=Field(default_factory=dict)
     claims:list[ProposedClaim]=Field(min_length=1)
     hypotheses:list[str]=Field(default_factory=list)
@@ -99,6 +100,14 @@ class RevisedClaim(ModelSchema):
 
 class Revision(ModelSchema):
     revised_approach:str|None=None
+
+    @field_validator("revised_approach", mode="before")
+    @classmethod
+    def _join_revised_approach(cls, value):
+        if isinstance(value,list) and all(isinstance(item,str) for item in value):
+            return "\n".join(value)
+        return value
+
     responses:list[AuthorResponseSchema]=Field(default_factory=list)
     revised_claims:list[RevisedClaim]=Field(default_factory=list)
 
