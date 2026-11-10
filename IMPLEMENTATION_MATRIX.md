@@ -8,9 +8,9 @@ The Appendix corrections override the older weak/strong status policy. **Checked
 | Full and quick definition mode | `council/cli.py`, `council/definition_sources.py`, `council/judge.py` | Five quick and five full **live** VRF definition runs completed before these mechanical-check changes: 8 and 134 completed responses respectively, with 8 and 161 logged attempts and 11 full-mode advisory picks; manual correctness comparison not yet scored |
 | Reference-grounded VRF objections and cross-game anchors | `council/objection_sections.py`, `council/vrf_audit.py`, `council/full.py` | Offline regression tests cover known misclassifications; quote matching and model verdicts remain advisory |
 | Independent verifier translator with fallback | `council/full.py`, `council/translate.py` | Offline simulated first-family failure and independent fallback; **not demonstrated live for checkable claims** |
-| Author-generated optional self-checks | `council/schemas.py`, `council/structured.py`, `council/verify/python_exec.py` | Scripts execute only inside fail-closed bubblewrap; evidence always marked nonindependent; mutation checks require positive and negative fixtures |
-| Actual checkers (numeric, SymPy, Z3, Python, mutation, optional formal) | `council/verify/`, `council/preflight.py` | Offline unit tests, **not yet preflight-verified on user's machine**; missing bwrap cannot trigger unsafe host execution |
-| Candidate vs evidence-supported final answers | `council/final_answers.py`, `council/full.py` | Conservative numeric/boolean extraction and offline support gating; candidates explicitly unverified |
+| Author-generated optional self-checks | `council/schemas.py`, `council/structured.py`, `council/verify/author_check.py`, `council/verify/python_exec.py` | Print-value recomputation and old JSON pass/fail self-tests run only inside fail-closed bubblewrap; evidence always nonindependent; self-inconsistent code blocks verified reporting even if a separate checker passes |
+| Actual checkers (numeric, SymPy, Z3, Python, mutation, optional formal) | `council/verify/`, `council/preflight.py` | Arithmetic aliases (expected_int etc.) and symbolic lhs/rhs aliases accepted with conflict validation. Offline unit tests pass; deployment bwrap preflight and live checker performance still require user-machine validation |
+| Scalar answer claims and evidence-gated final answers | `council/schemas.py`, `council/final_answers.py`, `council/full.py` | Proposals explicitly return final_answer; labeled fallback extraction handles inline numeric/boolean answers. Quick prioritizes at most one translator attempt for answer claims. Only question-literal arithmetic can be independently aligned automatically; unaligned word-problem translations remain unverified |
 | Bounded evidence, versioned ledger and debate | `council/models.py`, `council/moderator.py`, `council/ledger.py` | Offline regression tests; proof-to-English alignment and universal claims still unresolved |
 | Source-free disagreement report | `council/full.py`, `council/cli.py` | Competing claims/reviewer objections recorded, never marked proved |
 | Per-provider quota controls and pacing | `council/quota.py`, `council/transport.py`, `council/config.py` | Provider-shared TPM/RPM queue; **actual free limits must be entered by the account owner**. Unconfigured 30-RPM pacing is protective, not a provider guarantee |
@@ -20,6 +20,22 @@ The Appendix corrections override the older weak/strong status policy. **Checked
 | Role and timeout policy | `council/assignment.py`, `council/full.py`, `council/transport.py`, `council/cli.py` | Primary translator may fall back only to permitted nonowner families, never judge/auditor; actual configured role reservation validated. Explicit --timeout caps a request; unset --deadline inherits YAML default |
 | Repeated experiment isolation | `scripts/benchmark_vrf_modes.sh`, `scripts/benchmark_phase_a_modes.sh`, `eval/run_manifest.py` | A run directory is bound to Git revision, input hashes and settings; completed results are never overwritten, and interruption leaves inspectable partial files |
 | Replay, structured events, SQLite | `council/events.py`, `council/replay.py` | Offline tests; full interruption/resume recovery still needs real testing |
+
+## Latest Phase-A fixes (2026-11-10)
+
+- Groq/Cohere baseline calls now use plain-text response mode rather than
+  requiring JSON for a natural-language prompt. Structured proposal roles
+  retain their strict provider schemas.
+- Reworded claims with a source passage may reach the translator, but
+  unproven source-to-claim alignment continues to prevent certification.
+- A nonempty scalar final_answer is required by the strict proposal schema;
+  locally revalidated old/replayed proposals remain backwards-compatible.
+- Rate limits remain owner-configured in council.yaml. Placeholder free-tier
+  quotas are never installed or portrayed as real provider allowances.
+- An observed passing author self-test, or a translator-provided expression
+  that only happens to equal the answer, does not automatically count as
+  independent evidence. At least one verified answer in a small smoke run
+  is NOT an invariant: it depends on a genuinely alignable question.
 
 ## Mandatory local prerequisite
 
