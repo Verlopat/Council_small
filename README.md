@@ -39,7 +39,7 @@ python -m council.cli --recompute RUN_ID
 python -m council.cli --resume RUN_ID
 ```
 
-`quick` uses the first solver in `council.yaml`, then a translator and blind judge. `full` adds sealed proposals, rival extraction, reviews, revisions, scoped checks, bounded counterexample hunting/repair, judgment, and optional independent auditing. Both can return `unresolved`.
+`quick` uses the first solver in `council.yaml` and a scoped verification path; its default verdict uses local evidence policy without a paid/quota-consuming model judge (enable the optional judge via `COUNCIL_QUICK_LLM_JUDGE=1`). `full` adds sealed proposals, rival extraction, reviews, revisions, scoped checks, bounded counterexample hunting/repair, judgment, and optional independent auditing. Both can return `unresolved`.
 
 For citations to a provided, licensed **local paper corpus** (passage presence only, not truth):
 
@@ -62,6 +62,47 @@ python -m council.provider_diagnostics
 
 `eval.execute` does not spend API quota without explicit free-tier opt-in. Research benefits require scored held-out trials and fair matched-budget baselines; **no performance superiority is established yet**. The optional GitHub Actions weekly regression is off until `COUNCIL_RUN_LIVE_REGRESSION=true` and a bounded `COUNCIL_WEEKLY_MAX_REQUESTS` are configured.
 
+## Two-repeat verification (November 2026)
+
+Before any live evaluation, `python -m council.preflight --json` must
+pass execution, network, home and environment isolation checks. No sandbox
+preflight result proves that an arbitrary cryptographic claim is correct.
+
+For **two new VRF security-game quick/full pairs** with separate results
+(and no overwriting of the previous five-pair run):
+
+```bash
+git pull origin main
+RUN_DIR=runs/vrf_verify_nov10 COUNT=2 bash scripts/benchmark_vrf_modes.sh
+python -m eval.compare_vrf_modes --input-dir runs/vrf_verify_nov10 --count 2 \
+  --scores runs/vrf_verify_nov10/vrf_human_scores.csv
+```
+
+Grade the three definitions **manually** in the generated CSV using RFC 9381.
+The model's advisory selections do not count as independent correctness.
+
+For a **two-repeat Phase-A comparison** covering the first numeric, code and
+symbolic tasks, with no extra self-consistency or vote6 baseline API calls:
+
+```bash
+RUN_DIR=runs/phase_a_verify_nov10 COUNT=2 MAX_TASKS=3 \
+  bash scripts/benchmark_phase_a_modes.sh
+python -m eval.compare_repeated_modes --root runs/phase_a_verify_nov10 --count 2
+```
+
+Both scripts check isolation and avoid overwriting completed runs. By default
+they pace separate live jobs by 90 seconds; set `PAUSE_SECONDS` to an
+account-appropriate value. Repeated attempts measure stability but are
+**correlated**, not two new independent benchmark tasks. Always confirm your
+actual provider free quotas before using `--confirm-free`.
+
+Phase-A evaluation uses the configured roles, with `--no-baselines` to
+avoid multiplying the provider calls. If independent baselines are enabled,
+gold-derived arithmetic best-of-N is an **oracle-assisted bound**, excluded
+from fair paired accuracy comparisons. Hidden Python implementation tests
+run only through bubblewrap; absence of a trusted sandbox means ungraded
+code correctness, not a passing result.
+
 ## Safety and limitations
 
 - **Sandbox:** Generated verification code executes only in fail-closed bubblewrap isolation. Check deployment with `python -m council.preflight --json`. SymPy and Z3 are declared dependencies; Lean/Tamarin/ProVerif are optional external tools.
@@ -82,7 +123,7 @@ python -m council.provider_diagnostics
 
 See [Implementation Matrix](IMPLEMENTATION_MATRIX.md) for requirement boundaries.
 
-This working branch is intentionally **production-oriented**: the standalone unit-test suite and its offline-test CI workflow were removed from `main`. They remain recoverable through Git history. Removing tests does not establish correctness or replace deployment validation.
+The offline regression suite and GitHub Actions unit-test workflow are present on `main`. Tests check orchestration contracts, not live provider correctness or mathematical theorem validity.
 
 ## When quick mode returns unresolved before a proposal
 
@@ -196,8 +237,9 @@ or complete coverage; absence of flags is not evidence of correctness.
 The source distinction is explained in RFC 9381, Sections 3.1–3.4:
 https://www.rfc-editor.org/rfc/rfc9381.html
 
-The standalone offline unittest suite remains removed at the owner's
-request; these code changes require live owner-machine validation.
+The standalone offline unittest suite is restored and runs on every push to
+`main`. Provider- and sandbox-dependent behavior still needs validation
+on the owner's machine.
 
 ## Solver explanations, judge notes, and formatting-only quote recovery
 
@@ -414,11 +456,11 @@ Local strict Pydantic validation still runs. For provider near-misses only,
 fail. The JSON Schema request follows the current official API docs:
 https://docs.cohere.com/v2/docs/structured-outputs .
 
-**Nemotron:** The allowlisted OpenRouter Ultra endpoint has a 100-second
-per-call allowance, while LLM7 Nano has 90 seconds and an initial
-6,000-token output allowance for proposals/repairs. An ordinary
-`--timeout 60` is a default; these explicit per-endpoint longer allowances
-take precedence when enough of the global deadline remains. A *completed*
+**Nemotron and other slow reasoning endpoints:** Without an explicit timeout,
+the transport may use a longer configured per-endpoint allowance (currently
+up to 110 seconds for Nemotron and 120 seconds for Command). An explicit
+`--timeout 60` is now a **strict per-call ceiling**: it must not be
+silently raised by an endpoint default. The total run deadline is separate. A *completed*
 truncation on these roles can retry once using up to twice the prior
 output-token allowance (capped at 16,384), with another request reserved
 against the configured quota. Provider caps may be lower; an increased
