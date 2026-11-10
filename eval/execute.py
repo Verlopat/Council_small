@@ -243,9 +243,18 @@ async def execute(tasks,*,out_dir:Path,deadline:float,max_tasks:int,
                   rate_limits:dict|None=None,run_baselines=True,
                   runner_config=None):
     out_dir.mkdir(parents=True,exist_ok=True)
+    dest=out_dir/"results.jsonl"
+    partial=out_dir/"results.partial.jsonl"
+    # Fail before spending provider quota if prior results or an interrupted
+    # checkpoint exist. Never silently mix old/new experiments.
+    if dest.exists() or partial.exists():
+        raise FileExistsError(
+            "Evaluation results already exist in "+str(out_dir)+
+            "; use a fresh --out directory or manually archive both files")
     rows=[]
     shared_quota=None
-    for task in tasks[:max_tasks]:
+    with partial.open("x",encoding="utf-8") as checkpoint:
+      for task in tasks[:max_tasks]:
         run_id=uuid.uuid4().hex[:16]
         with EventStore(out_dir,run_id) as events:
             transport=FamilyTransport(record=events.record)
@@ -266,15 +275,16 @@ async def execute(tasks,*,out_dir:Path,deadline:float,max_tasks:int,
                 # Do not reset RPM, TPM, or daily reservations between
                 # adjacent evaluation tasks and baselines.
                 transport.quota=shared_quota
-            rows+=await run_task(task,transport,events,deadline=deadline,
+            fresh=await run_task(task,transport,events,deadline=deadline,
                                  baseline_samples=baseline_samples,
                                  mode=mode,paper_index=paper_index,
                                  run_baselines=run_baselines,
                                  runner_config=runner_config)
-    dest=out_dir/"results.jsonl"
-    with dest.open("w",encoding="utf-8") as fh:
-        for row in rows:
-            fh.write(json.dumps(row,ensure_ascii=False)+"\n")
+            rows.extend(fresh)
+            for row in fresh:
+                checkpoint.write(json.dumps(row,ensure_ascii=False)+"\n")
+            checkpoint.flush()
+    partial.replace(dest)
     return dest,rows
 
 def main(argv=None):
@@ -307,7 +317,8 @@ def main(argv=None):
     tasks=load(selected_tasks,split=args.split)
     if args.paper_index and not args.paper_index.is_file():
         parser.error("--paper-index must point to an existing SQLite index")
-    upper_calls=args.max_tasks*(55+(args.baseline_samples or 55)+6)
+    upper_calls=args.max_tasks*(
+        55 if args.no_baselines else 55+(args.baseline_samples or 55)+6)
     if not args.confirm_free:
         print(json.dumps({"mode":"plan_only","tasks":min(len(tasks),args.max_tasks),
                           "per_task_deadline":args.deadline,
