@@ -341,5 +341,45 @@ class ScoringAndCodeArtifactTests(unittest.TestCase):
         self.assertEqual(rows[0]["verified"],0)
 
 
+class AffordableBaselineTests(unittest.TestCase):
+    def test_skip_vote6_preserves_single_majority_and_prevents_six_calls(self):
+        from council.transport import CallResult
+        from eval.execute import run_task
+        class DummyCouncil:
+            def __init__(self,*args,**kwargs):
+                pass
+            async def run(self,*args,**kwargs):
+                return {"research_result":{"completion_status":"partial"},
+                        "candidate_answers":{"p1":"42"},
+                        "final_answer":None,"proposals":[],
+                        "verdict":{"status":"unresolved"},
+                        "composition":{"outcome":"unchecked"}}
+        class FakeTransport:
+            def __init__(self):
+                self.roles=[]
+            async def complete(self,family,message,budget,*,role,synthesis=False):
+                self.roles.append(role)
+                if role=="baseline_vote6":
+                    raise AssertionError("six-family vote must not run")
+                return CallResult(family,family,"model","Answer: 42",
+                                  .01,"digest")
+        class FakeEvents:
+            def replay(self):
+                return [{"event":"model_call_started"} for _ in range(2)]
+        async def act():
+            transport=FakeTransport()
+            with patch("eval.execute.FullCouncilRunner",DummyCouncil):
+                rows=await run_task({"id":"numeric","kind":"numeric",
+                                     "prompt":"What is 6*7?","expected":"42"},
+                                    transport,FakeEvents(),deadline=30,
+                                    baseline_samples=2,skip_vote6=True)
+            return rows,transport.roles
+        rows,roles=asyncio.run(act())
+        self.assertEqual([r["system"] for r in rows],
+                         ["council","self_consistency","single"])
+        self.assertEqual(roles,["baseline","baseline"])
+        self.assertEqual(rows[1]["correct"],1)
+
+
 if __name__=="__main__":
     unittest.main()
