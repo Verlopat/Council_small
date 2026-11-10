@@ -388,11 +388,10 @@ class FullCouncilRunner(CouncilRunner):
         A quick-mode solver may also use an eligible full-mode solver as a
         translator, but only when the configured primary route is down.
         """
-        order=[self.translator_family,*self.solvers,
-               "gpt-oss","command","nemotron"]
-        excluded={claim.owner_family,self.judge_family,self.auditor_family,None}
-        return [f for f in dict.fromkeys(order)
-                if f and f not in excluded]
+        # Delegate to the same immutable allocation used by role checks.
+        # The previous parallel list could disagree with Assignment.allowed
+        # and silently bypass reserved-role invariants.
+        return list(self.assignment.translator_candidates(claim.owner_family))
 
     async def _translate_and_check(self,claim:Claim):
         if is_meta_claim(claim.statement):
