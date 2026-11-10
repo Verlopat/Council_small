@@ -336,9 +336,9 @@ class FullCouncilRunner(CouncilRunner):
         source_span=question
         unaligned=True
         direct=re.fullmatch(
-            r"(?is)\\s*(?:what\\s+is|compute|calculate|evaluate)\\s+"
-            r"([0-9\\s+*/()%-]+)\\s*\\??\\s*",question)
-        if direct and re.fullmatch(r"[+-]?\\d+",final):
+            r"(?is)\s*(?:what\s+is|compute|calculate|evaluate)\s+"
+            r"([0-9\s+*/()%-]+)\s*\??\s*",question)
+        if direct and re.fullmatch(r"[+-]?\d+",final):
             expression=direct.group(1).strip()
             if expression and len(expression)<250:
                 statement=expression+" = "+final
@@ -519,12 +519,12 @@ class FullCouncilRunner(CouncilRunner):
             payload["question"]=question
             payload["claimed_final_answer"]=claim.statement
         for family in self._translator_candidates(claim):
+            if family in self._translators_down or self.budget.debate_remaining()<=2:
+                continue
             if getattr(self,"_active_mode","full")=="quick":
                 if getattr(self,"_quick_translation_calls",0)>=1:
                     break
                 self._quick_translation_calls+=1
-            if family in self._translators_down or self.budget.debate_remaining()<=2:
-                continue
             proposal=await self._call(family,"translate",payload)
             if proposal is not None:
                 first_family=family
@@ -1315,7 +1315,7 @@ class FullCouncilRunner(CouncilRunner):
         except OutputError:return
         for entry in raws[:self.max_claims]:
             try:
-                statement=re.sub(r"^\\s*\\[(?:S|R)\\d+\\]\\s*", "",
+                statement=re.sub(r"^\s*\[(?:S|R)\d+\]\s*", "",
                                  require_string(entry,"statement"))
                 if is_meta_claim(statement):
                     self.events.record("rival_meta_claim_skipped",
