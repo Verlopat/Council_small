@@ -27,7 +27,19 @@ def earns_its_place(deltas,higher_is_better=True):
     return lo>0 if higher_is_better else hi<0
 
 def summary(rows):
-    if not rows:return {}
+    """Report observed numeric metrics only; missing and ungraded are not 0.
+
+    Code tasks whose sandbox checks are unavailable contain None values.
+    Converting None to float aborts evaluation; converting it to zero would
+    incorrectly count an ungraded check as a passing/failed observation.
+    """
+    if not rows:
+        return {}
     keys=("false_verified","unresolved","no_op","composition_unchecked",
           "pressure_concession","calls","tokens","latency")
-    return {k:statistics.fmean(float(row.get(k,0)) for row in rows) for k in keys}
+    result={}
+    for key in keys:
+        values=[float(row[key]) for row in rows
+                if type(row.get(key)) in (int,float,bool)]
+        result[key]=statistics.fmean(values) if values else None
+    return result
