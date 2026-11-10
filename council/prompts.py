@@ -41,14 +41,17 @@ Put only its final value in final_answer, e.g. "13", "yes", "106".
 For genuinely open research questions write final_answer="".
 Never replace the requested result with a plan or a suggestion to calculate it.
 If the task is numeric, code, or symbolic, optionally supply a SELF-WRITTEN
-check as artifact = {"kind":"python","code":"Python source ending in a printed
-JSON object with pass: true/false","valid_examples":[],"invalid_examples":[]}.
+Python artifact with kind="python", code (a Python source string),
+valid_examples (list), invalid_examples (list).
+When final_answer is NONEMPTY, the Python code should compute it and PRINT
+ONLY that final scalar on its LAST output line, e.g. print(106).
+Do not print JSON pass/fail in this case.
+When final_answer is EMPTY and the artifact is an ordinary self-test,
+the code may instead print a final JSON {"pass":true|false}.
 For any other task or whenever a discriminating test cannot be supplied, use
 {"kind":"none","code":"","valid_examples":[],"invalid_examples":[]}.
-For numeric/code/symbolic tasks, Python artifact.code MAY compute the answer
-and print the final value as its LAST output line, e.g. print(106), instead
-of the legacy JSON pass/fail self-test. This is author consistency ONLY and
-will never certify correctness. Code MUST stay valid Python.
+A Python artifact is author consistency ONLY, never independent proof.
+Code MUST stay valid Python, and never claim it has already been executed.
 Self-written tests are NOT independent verification or scientific proof;
 never claim to have run the artifact. Positive/negative examples (if supplied)
 must be complete standalone Python scripts that print final JSON pass booleans.
