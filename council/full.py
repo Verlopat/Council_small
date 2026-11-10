@@ -328,8 +328,15 @@ class FullCouncilRunner(CouncilRunner):
         can be aligned mechanically. Word problems and yes/no judgments
         remain unaligned even when a translator evaluates some expression.
         """
-        final=(normalize_answer(p.get("final_answer"))
-               or extract_final_answer(p.get("answer") or p["approach"]))
+        final=normalize_answer(p.get("final_answer"))
+        if final is None:
+            # A bare equation in the approach is not automatically the
+            # requested answer. Only an EXPLICIT final-answer label can
+            # create an answer-scoped claim when the structured field is
+            # empty. Legacy arithmetic claims retain their original checks.
+            source=p.get("answer") or p["approach"]
+            if re.search(r"\bfinal\s+answer\s*[:=]",source,re.I):
+                final=extract_final_answer(source)
         if final is None:
             return
         p["final_answer"]=final
