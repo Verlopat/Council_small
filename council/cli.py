@@ -135,7 +135,7 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="Evidence-aware multi-model research council")
     parser.add_argument("question", nargs="*", help="A research question")
     parser.add_argument("--mode", choices=("quick", "research", "full"), default="research")
-    parser.add_argument("--deadline", type=float, default=300.0,
+    parser.add_argument("--deadline", type=float, default=None,
                         help="Total seconds, including synthesis and audit")
     parser.add_argument("--timeout", type=float, default=None,
                         help="Per inference request timeout")
@@ -217,9 +217,12 @@ def main(argv=None) -> int:
             transport = ReplayTransport(recorded)
             if args.resume:
                 transport = ResumeTransport(recorded,
-                    FamilyTransport(timeout=args.timeout or 28.0, record=destination.record))
-            budget = RunBudget.start(args.deadline,
-                 reserve=min(20.0, args.deadline / 3))
+                    FamilyTransport(timeout=args.timeout or 28.0,
+                                    strict_timeout=args.timeout is not None,
+                                    record=destination.record))
+            replay_deadline=args.deadline if args.deadline is not None else 300.0
+            budget = RunBudget.start(replay_deadline,
+                 reserve=min(20.0, replay_deadline / 3))
             if mode == "quick" and metadata.get("pipeline") == "evidence":
                 from council.full import QuickCouncilRunner
                 from council.requirements import Requirements
@@ -262,8 +265,10 @@ def main(argv=None) -> int:
     question = " ".join(args.question).strip()
     if not question:
         parser.error("Provide a research question, --list-families or --replay")
-    if args.deadline <= 0 or (args.timeout is not None and args.timeout <= 1):
+    if ((args.deadline is not None and args.deadline <= 0) or
+            (args.timeout is not None and args.timeout <= 1)):
         parser.error("Deadline and timeout must be positive")
+
     cfg = None
     if args.mode in ("quick", "full"):
         from council.full import FULL_SOLVERS
@@ -275,6 +280,8 @@ def main(argv=None) -> int:
         solvers = configured[:1] if args.mode == "quick" else configured
     else:
         solvers = DEFAULT_SOLVERS
+    if args.deadline is None:
+        args.deadline=(cfg.deadline_seconds if cfg is not None else 300.0)
     if args.dry_run:
         print(json.dumps({"mode": args.mode, "question": question,
                           "solvers": solvers,
