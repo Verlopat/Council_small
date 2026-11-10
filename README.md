@@ -103,6 +103,42 @@ from fair paired accuracy comparisons. Hidden Python implementation tests
 run only through bubblewrap; absence of a trusted sandbox means ungraded
 code correctness, not a passing result.
 
+## Phase-A scalar-answer and check-path smoke test (November 10)
+
+Phase-A proposals now have a strict `final_answer` field for scalar results.
+Final-answer extraction also accepts a labeled value inside a sentence;
+baseline requests use plain text rather than Groq JSON mode. Reworded
+source-anchored claims can be checked, but source-to-claim semantics remain
+unverified. Author-written Python may print the proposed scalar and is checked
+only in the isolated sandbox. Matching the author's own result is **not
+independent support**. Quick mode prioritizes one answer translation attempt.
+
+Before testing, run `python -m council.preflight --json` and ensure
+execution, network, home and environment isolation all pass. Use a new output
+directory to prevent overwriting an earlier, partially completed experiment.
+
+```bash
+git pull origin main
+python -m council.preflight --json
+python -m eval.execute --tasks eval/tasks/phase_a_dev.jsonl \
+  --mode full --max-tasks 3 --deadline 1200 \
+  --baseline-samples 2 --skip-vote6 \
+  --out runs/phase_a_scalar_smoke_nov10 --confirm-free
+python -m eval.run_eval runs/phase_a_scalar_smoke_nov10 \
+  --baseline self_consistency
+```
+
+`--skip-vote6` suppresses the six additional family-vote API calls while
+retaining the single-model and self-consistency baselines. The full two-repeat
+quick/full script uses `--no-baselines` to avoid all extra baseline calls.
+
+An arithmetic answer may be independently verified only when the exact
+calculated expression can be grounded in the original question and recomputed.
+For word problems the model-translated expression is **not** independent
+semantic validation; `correct_verified` can legitimately remain zero even
+when the predicted result matches the benchmark's hidden reference.
+Blindly forcing a positive verified flag is explicitly disallowed.
+
 ## Safety and limitations
 
 - **Sandbox:** Generated verification code executes only in fail-closed bubblewrap isolation. Check deployment with `python -m council.preflight --json`. SymPy and Z3 are declared dependencies; Lean/Tamarin/ProVerif are optional external tools.
