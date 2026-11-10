@@ -18,7 +18,7 @@ def _read(path):
             if line.strip()]
 
 
-def analyze(file,baseline="best_of_n",metric="correct"):
+def analyze(file,baseline="self_consistency",metric="correct"):
     rows=_read(file)
     usable=[r for r in rows if r.get(metric) is not None]
     differences=paired_deltas(usable,baseline=baseline,metric=metric)
@@ -71,7 +71,8 @@ def main(argv=None):
                         help="One results.jsonl or evaluation directory")
     parser.add_argument("second",type=Path,nargs="?",
                         help="Optional second evaluation directory (quick then full)")
-    parser.add_argument("--baseline",default="best_of_n")
+    parser.add_argument("--baseline",default="self_consistency",
+                        help="Fair equal-call baseline; best_of_n may be oracle-assisted and excluded")
     parser.add_argument("--metric",default="correct")
     args=parser.parse_args(argv)
     if args.second is not None:
