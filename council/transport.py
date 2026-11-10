@@ -40,8 +40,11 @@ class CallResult:
 
 class FamilyTransport:
     def __init__(self, *, timeout: float = 28.0, health_file: Path | None = None,
-                 record=None):
+                 record=None, strict_timeout: bool = False):
+        if timeout<=1 or not __import__("math").isfinite(timeout):
+            raise ValueError("timeout must be finite and greater than 1 second")
         self.timeout = timeout
+        self.strict_timeout=bool(strict_timeout)
         self.router = Router(timeout=timeout)
         self.cache = HealthCache(health_file or Path(".router_health.json"))
         self.record = record or (lambda *a, **k: None)
@@ -82,7 +85,10 @@ class FamilyTransport:
         failures = []
         seen: set[tuple[str, str]] = set()
         for entry in endpoint_list(family):
-            endpoint_timeout = max(self.timeout, entry.timeout_seconds or 0)
+            # With an explicit CLI timeout, do not silently extend the
+            # request to a provider's longer preferred endpoint timeout.
+            endpoint_timeout=(self.timeout if self.strict_timeout else
+                              max(self.timeout,entry.timeout_seconds or 0))
             if not self._eligible(entry.provider):
                 failures.append(entry.provider + ": unconfigured or free mode unconfirmed")
                 continue
