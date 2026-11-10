@@ -64,6 +64,8 @@ def extract_final_answer(value:object)->str|None:
 
 def _answer_claim_supported(proposal:dict,ledger)->bool:
     answer_id=proposal.get("answer_claim_id")
+    if proposal.get("author_inconsistency"):
+        return False
     if not isinstance(answer_id,str) or answer_id not in ledger.claims:
         return False
     claim=ledger.claims[answer_id]
