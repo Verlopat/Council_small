@@ -6,6 +6,11 @@ COUNT="${COUNT:-2}"
 MAX_TASKS="${MAX_TASKS:-3}"
 PAUSE_SECONDS="${PAUSE_SECONDS:-90}"
 TASK_FILE="${TASK_FILE:-eval/tasks/phase_a_dev.jsonl}"
+SPLIT="${SPLIT:-dev}"
+if [[ "$SPLIT" != "dev" && "$SPLIT" != "heldout" ]]; then
+  echo "SPLIT must be dev or heldout" >&2
+  exit 2
+fi
 
 if [[ ! "$COUNT" =~ ^[1-9][0-9]*$ ]] || (( COUNT > 20 )); then
   echo "COUNT must be 1..20" >&2
@@ -42,6 +47,11 @@ for ((i=1; i<=COUNT; ++i)); do
   for mode in quick full; do
     out="$RUN_DIR/${mode}_${i}"
     result="$out/results.jsonl"
+    if [[ -e "$out/results.partial.jsonl" ]]; then
+      echo "Interrupted run checkpoint exists: $out/results.partial.jsonl" >&2
+      echo "Archive it manually before starting a fresh run; no API calls started." >&2
+      exit 1
+    fi
     if [[ -e "$result" ]]; then
       # Never mix partial and completed evaluations.
       if python - "$result" "$MAX_TASKS" "$mode" <<'PY'
@@ -72,6 +82,7 @@ PY
     mkdir -p "$out"
     echo "Running $mode repeat $i/$COUNT with $MAX_TASKS tasks"
     python -m eval.execute --tasks "$TASK_FILE" \
+      --split "$SPLIT" \
       --mode "$mode" --max-tasks "$MAX_TASKS" \
       --deadline "$deadline" --no-baselines \
       --out "$out" --confirm-free \
