@@ -43,26 +43,47 @@ def analyze(file,baseline="self_consistency",metric="correct"):
 
 
 def paired_mode_comparison(quick_path, full_path, metric="correct"):
-    quick={r["task_id"]:r for r in _read(quick_path)
-           if r.get("system")=="council" and r.get(metric) is not None}
-    full={r["task_id"]:r for r in _read(full_path)
-          if r.get("system")=="council" and r.get(metric) is not None}
-    pairs={tid:(quick[tid],full[tid]) for tid in sorted(set(quick)&set(full))}
+    """Compare paired tasks, averaging repeats before resampling task IDs.
+
+    Do not silently keep only the last repeat of a task. Repeats are
+    correlated observations; confidence intervals must resample distinct
+    tasks rather than treating all repeated runs as independent.
+    """
+    from collections import defaultdict
+    def collect(path):
+        groups=defaultdict(list)
+        for row in _read(path):
+            if (row.get("system")=="council"
+                    and row.get(metric) is not None):
+                groups[row["task_id"]].append(row)
+        return groups
+    quick,full=collect(quick_path),collect(full_path)
+    paired={}
+    for task_id in sorted(set(quick)&set(full)):
+        q,f=quick[task_id],full[task_id]
+        kinds={r.get("kind") or "unknown" for r in q+f}
+        if len(kinds)!=1:
+            raise ValueError("Task kind differs across paired runs: "+task_id)
+        paired[task_id]=(
+            next(iter(kinds)),
+            sum(float(row[metric]) for row in q)/len(q),
+            sum(float(row[metric]) for row in f)/len(f),
+            min(len(q),len(f)))
     def calculate(items):
-        deltas=[float(f[metric])-float(q[metric]) for q,f in items]
-        return {"paired_tasks":len(deltas),
+        deltas=[f-q for kind,q,f,reps in items]
+        n=len(deltas)
+        return {"paired_tasks":n,
+                "paired_replicate_attempts":sum(reps for _,_,_,reps in items),
                 "full_minus_quick_ci":bootstrap_ci(deltas) if deltas else None,
-                "quick_accuracy":sum(float(q[metric]) for q,f in items)/len(items)
-                                 if items else None,
-                "full_accuracy":sum(float(f[metric]) for q,f in items)/len(items)
-                                if items else None}
-    result={"overall":calculate(list(pairs.values())),"by_kind":{}}
-    kinds=sorted(set(q.get("kind") or "unknown" for q,f in pairs.values()))
-    for kind in kinds:
-        items=[pair for pair in pairs.values()
-               if (pair[0].get("kind") or "unknown")==kind]
-        result["by_kind"][kind]=calculate(items)
-    return result
+                "quick_accuracy":sum(q for _,q,_,_ in items)/n if n else None,
+                "full_accuracy":sum(f for _,_,f,_ in items)/n if n else None}
+    return {
+        "overall":calculate(list(paired.values())),
+        "by_kind":{
+            kind:calculate([row for row in paired.values() if row[0]==kind])
+            for kind in sorted({row[0] for row in paired.values()})},
+        "note":"Repeated attempts are averaged per distinct task before "
+               "task-level bootstrapping; missing or ungraded outcomes excluded."}
 
 
 def main(argv=None):
