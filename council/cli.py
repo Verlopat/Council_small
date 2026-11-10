@@ -295,7 +295,9 @@ def main(argv=None) -> int:
     with EventStore(args.run_dir, run_id) as events:
         transport = FamilyTransport(timeout=(
             args.timeout if args.timeout is not None else
-            cfg.per_call_timeout if cfg else 28.0), record=events.record)
+            cfg.per_call_timeout if cfg else 28.0),
+            strict_timeout=args.timeout is not None,
+            record=events.record)
         if cfg:
             for provider, settings in cfg.rate_limits.items():
                 for family in FAMILIES.values():
