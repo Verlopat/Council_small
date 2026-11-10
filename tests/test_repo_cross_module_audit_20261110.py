@@ -380,5 +380,44 @@ class BenchmarkManifestTests(unittest.TestCase):
                                 inputs=[task],revision="a"*40)
 
 
+class TranslatorRolePolicyTests(unittest.TestCase):
+    def test_allocator_and_runner_agree_on_independent_fallbacks(self):
+        from council.assignment import Assignment
+        from council.full import FullCouncilRunner
+        from council.budget import RunBudget
+        from council.events import EventStore
+        from council.models import Claim
+        assignment=Assignment(
+            ("gpt-oss","command","nemotron"),"glm","gemini","gemma")
+        allowed=assignment.translator_candidates("gpt-oss")
+        self.assertEqual(allowed,("glm","command","nemotron"))
+        self.assertNotIn("gemma",allowed)
+        self.assertNotIn("gemini",allowed)
+        self.assertNotIn("gpt-oss",allowed)
+        self.assertTrue(assignment.allowed(
+            "translator","command",claim_owner="gpt-oss"))
+        self.assertFalse(assignment.allowed(
+            "translator","gemma",claim_owner="gpt-oss"))
+        with tempfile.TemporaryDirectory() as folder:
+            with EventStore(Path(folder),"policy") as events:
+                runner=FullCouncilRunner(
+                    None,events,RunBudget.start(60),
+                    solvers=assignment.solvers,
+                    translator_family=assignment.translator,
+                    judge_family=assignment.judge,
+                    auditor_family=assignment.auditor)
+                self.assertEqual(
+                    runner._translator_candidates(
+                        Claim("p1:c1",1,"Test", "gpt-oss")),
+                    list(allowed))
+
+    def test_no_judge_or_auditor_role_reuse_via_fallback(self):
+        from council.assignment import Assignment
+        assignment=Assignment(
+            ("gpt-oss","command"),"glm","gemini","nemotron")
+        self.assertNotIn("nemotron",assignment.translator_candidates("gpt-oss"))
+        self.assertNotIn("gemini",assignment.translator_candidates("gpt-oss"))
+
+
 if __name__=="__main__":
     unittest.main()
