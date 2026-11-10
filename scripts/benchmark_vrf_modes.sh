@@ -60,9 +60,12 @@ for ((i=1; i<=COUNT; ++i)); do
     tmp="${target}.partial"
     deadline=240
     [[ "$mode" == "full" ]] && deadline=1200
+    # Use the same council.yaml endpoint allowances for both modes.
+    # Explicit --timeout 60 is a strict ceiling, which can truncate
+    # Command/Nemotron and unfairly penalize full mode.
     echo "Running $mode sample $i/$COUNT (provider quotas and deadlines apply)"
     if ! python -m council.cli \
-        --mode "$mode" --deadline "$deadline" --timeout 60 \
+        --mode "$mode" --deadline "$deadline" \
         --paper-index "$PAPER_INDEX" --run-dir "$RUN_DIR" \
         --json "$QUESTION" \
         > "$tmp" 2> "$RUN_DIR/${mode}_${i}.stderr.log"; then
