@@ -62,13 +62,30 @@ def extract_final_answer(value:object)->str|None:
     return None
 
 
-def _answer_claim_supported(proposal:dict,ledger)->bool:
+def _answer_claim_supported(proposal:dict,ledger,candidate:str)->bool:
     answer_id=proposal.get("answer_claim_id")
     if proposal.get("author_inconsistency"):
         return False
     if not isinstance(answer_id,str) or answer_id not in ledger.claims:
         return False
+    if answer_id!=proposal.get("id","")+":answer":
+        return False
     claim=ledger.claims[answer_id]
+    if (proposal.get("family") is not None
+            and claim.owner_family!=proposal.get("family")):
+        return False
+    # Supported evidence must be about THIS scalar, not an unrelated
+    # expression attached to an answer-shaped claim.
+    match=re.fullmatch(r"\s*[^=]+\s*=\s*("+NUM+r")\s*",claim.statement)
+    if match:
+        stated=normalize_answer(match.group(1))
+    elif claim.statement.startswith("Reported final scalar result: "):
+        stated=normalize_answer(
+            claim.statement.removeprefix("Reported final scalar result: "))
+    else:
+        return False
+    if stated is None or stated!=candidate:
+        return False
     if claim.status is not ClaimStatus.SUPPORTED or claim.needs_re_evaluation:
         return False
     if not any(
@@ -94,7 +111,7 @@ def proposal_answers(proposals:list[dict],ledger)->tuple[str|None,dict[str,str|N
         if proposal.get("answer_claim_id"):
             # Scoped answer check can pass even with unverified explanatory
             # siblings, but never with a contradicted sibling.
-            if _answer_claim_supported(proposal,ledger):
+            if _answer_claim_supported(proposal,ledger,candidate):
                 verified=candidate
             continue
         # Backward-compatible whole-proposal path for old replay records.
