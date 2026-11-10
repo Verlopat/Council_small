@@ -42,6 +42,9 @@ if missing:
                      ". No model calls started. Inspect "+sys.argv[1])
 PY
 
+python -m eval.run_manifest --root "$RUN_DIR" --experiment phase_a \
+  --input "$TASK_FILE" --input council.yaml \
+  --options "$SPLIT:$MAX_TASKS"
 previous_call=0
 for ((i=1; i<=COUNT; ++i)); do
   for mode in quick full; do
