@@ -130,9 +130,17 @@ async def run_task(task,transport,events,*,deadline,baseline_samples=0,
     if task.get("kind")=="code" and isinstance(task.get("hidden_spec"),dict):
         # Selection is syntactic only: never inspect hidden cases to choose a
         # proposal. The hidden test measures the first runnable code version.
-        sources=[p.get("answer") or p.get("approach")
-                 for p in council.get("proposals",[]) or []
-                 if isinstance(p,dict)]
+        sources=[]
+        for proposal in council.get("proposals",[]) or []:
+            if not isinstance(proposal,dict):
+                continue
+            artifact=proposal.get("artifact") or {}
+            if isinstance(artifact,dict):
+                sources.append(artifact.get("code"))
+            sources.append(proposal.get("answer") or proposal.get("approach"))
+        # The model may put the actual f(xs) implementation only in
+        # artifact.code; ignoring it was scoring valid implementations
+        # as missing. Selection here is syntax-only, NEVER hidden-gold-based.
         source=next((v for v in sources if extract_function_source(v)),None)
         hidden=await asyncio.to_thread(
             hidden_case_outcome,source,task["hidden_spec"])
