@@ -31,6 +31,7 @@ PROPOSAL_SCHEMA = {
     "type": "object",
     "properties": {
         "approach": STRINGS,
+        "final_answer": STRINGS,
         "artifact": {"type": "object", "properties": {
             "kind": STRINGS,"code": STRINGS,
             "valid_examples": STRING_LIST,
@@ -41,7 +42,7 @@ PROPOSAL_SCHEMA = {
         "hypotheses": STRING_LIST,
         "experiments": STRING_LIST,
     },
-    "required": ["approach", "artifact", "claims", "hypotheses", "experiments"],
+    "required": ["approach", "final_answer", "artifact", "claims", "hypotheses", "experiments"],
     "additionalProperties": False,
 }
 
@@ -117,6 +118,10 @@ GEMINI_OBJECTION_JUDGE_SCHEMA = {
 
 
 def response_format(provider: str, model: str, role: str) -> dict | None:
+    # Baseline prompts ask for plain answers; enforcing a JSON response
+    # without asking for JSON makes Groq GPT-OSS return HTTP 400.
+    if role.startswith("baseline"):
+        return None
     if provider == "Cohere":
         # Chat v2: response_format={type:json_object,schema:...}
         # Never interpret provider-side schema compliance as source verification.
