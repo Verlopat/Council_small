@@ -340,5 +340,45 @@ class CheckpointAndVoteTests(unittest.TestCase):
             self.assertIn("valuable",partial.read_text())
 
 
+class BenchmarkManifestTests(unittest.TestCase):
+    def test_manifest_reuse_requires_exact_code_input_and_options(self):
+        from eval.run_manifest import verify_manifest
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp)/"runs"
+            task=Path(temp)/"tasks.jsonl"
+            task.write_text("original tasks")
+            rev="a"*40
+            before=verify_manifest(root,experiment="phase_a",
+                                   inputs=[task],options="dev:3",
+                                   revision=rev)
+            again=verify_manifest(root,experiment="phase_a",
+                                  inputs=[task],options="dev:3",
+                                  revision=rev)
+            self.assertEqual(before,again)
+            with self.assertRaises(ValueError):
+                verify_manifest(root,experiment="phase_a",
+                                inputs=[task],options="dev:10",
+                                revision=rev)
+            with self.assertRaises(ValueError):
+                verify_manifest(root,experiment="phase_a",
+                                inputs=[task],options="dev:3",
+                                revision="b"*40)
+            task.write_text("different tasks")
+            with self.assertRaises(ValueError):
+                verify_manifest(root,experiment="phase_a",
+                                inputs=[task],options="dev:3",
+                                revision=rev)
+
+    def test_unmanifested_prior_data_never_silently_reused(self):
+        from eval.run_manifest import verify_manifest
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp)/"runs";root.mkdir()
+            task=Path(temp)/"tasks.jsonl";task.write_text("task")
+            (root/"quick_1.json").write_text("{}")
+            with self.assertRaises(ValueError):
+                verify_manifest(root,experiment="vrf",
+                                inputs=[task],revision="a"*40)
+
+
 if __name__=="__main__":
     unittest.main()
