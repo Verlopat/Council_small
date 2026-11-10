@@ -8,6 +8,7 @@ import asyncio
 from dataclasses import dataclass
 import hashlib
 import json
+import math
 import os
 import time
 from pathlib import Path
@@ -41,7 +42,7 @@ class CallResult:
 class FamilyTransport:
     def __init__(self, *, timeout: float = 28.0, health_file: Path | None = None,
                  record=None, strict_timeout: bool = False):
-        if timeout<=1 or not __import__("math").isfinite(timeout):
+        if timeout<=1 or not math.isfinite(timeout):
             raise ValueError("timeout must be finite and greater than 1 second")
         self.timeout = timeout
         self.strict_timeout=bool(strict_timeout)
