@@ -167,7 +167,11 @@ class CouncilRunner:
             self.ledger.add_claim(Claim(
                 id=cid, version=1, statement=statement, owner_family=family,
                 limitations=string_list(raw, "limitations")))
+        final_answer=body.get("final_answer") or ""
+        if not isinstance(final_answer,str):
+            raise OutputError("final_answer must be a string")
         return {"id": proposal_id, "family": family, "approach": approach,
+                "final_answer":final_answer.strip(),
                 "claim_ids": list(claim_map.values()), "claim_map": claim_map,
                 "hypotheses": string_list(body, "hypotheses"),
                 "experiments": string_list(body, "experiments"),
