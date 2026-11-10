@@ -4,6 +4,7 @@ This is NOT a semantic or factual correctness judge.
 """
 from decimal import Decimal, InvalidOperation
 import re
+from council.final_answers import extract_final_answer
 
 NUMBER = r'[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?'
 
@@ -24,7 +25,13 @@ def matches_expected(response: str, expected: str) -> bool:
         return False
     if actual == wanted:
         return True
+    # Consistent with Council's candidate extraction: an explicitly labeled
+    # final answer may be at the END of a sentence, not a separate line.
+    scalar=extract_final_answer(actual)
     if wanted.lower() in {"yes","no","true","false"}:
+        if scalar in {"yes","no","true","false"}:
+            aliases={"true":"yes","yes":"yes","false":"no","no":"no"}
+            return aliases[scalar]==aliases[wanted.lower()]
         # Symbolic truth tasks use an explicit terminal yes/no answer, not
         # arbitrary occurrences of "yes" somewhere in a proof.
         last=actual.splitlines()[-1].strip().replace("**","").strip()
@@ -35,6 +42,11 @@ def matches_expected(response: str, expected: str) -> bool:
         return bool(found and aliases[found.group(1).lower()]==aliases[wanted.lower()])
     if not re.fullmatch(NUMBER, wanted):
         return False
+    if scalar is not None:
+        try:
+            return Decimal(scalar.replace(",","")) == Decimal(wanted.replace(",",""))
+        except InvalidOperation:
+            return False
     if not actual:
         return False
 
