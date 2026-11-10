@@ -31,8 +31,10 @@ def extract_final_answer(value: object) -> str | None:
         # Equation ends in a number; do not parse a number in prose.
         if re.fullmatch(r"[\d\s+\-*/()%.,^]+=\s*"+NUM+r"\s*",item):
             return EQUAL.search(item).group(1).replace(",","")
-        if re.fullmatch(r"(?i)(?:final\s+answer\s*:\s*)?(?:true|false|yes|no)",item):
-            return re.search(r"(true|false|yes|no)$",item,re.I).group(1).lower()
+        if re.fullmatch(
+                r"(?i)(?:(?:the\s+)?(?:final\s+)?answer"
+                r"\s*(?::|is|=)\s*)?(?:true|false|yes|no)[.!]?",item):
+            return re.search(r"(true|false|yes|no)[.!]?$",item,re.I).group(1).lower()
         return None
     return None
 
