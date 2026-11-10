@@ -328,9 +328,11 @@ class FullCouncilRunner(CouncilRunner):
         can be aligned mechanically. Word problems and yes/no judgments
         remain unaligned even when a translator evaluates some expression.
         """
-        final=normalize_answer(p.get("final_answer"))
+        final=(normalize_answer(p.get("final_answer"))
+               or extract_final_answer(p.get("answer") or p["approach"]))
         if final is None:
             return
+        p["final_answer"]=final
         aid=p["id"]+":answer"
         statement="Reported final scalar result: "+final
         source_span=question
@@ -423,6 +425,7 @@ class FullCouncilRunner(CouncilRunner):
         self.extra_obligations.append(claim.id+
             ": author-written check is not independent evidence")
         if recomputed and outcome=="fail":
+            proposal["author_inconsistency"]=True
             self.extra_obligations.append(
                 claim.id+": author's Python output contradicts its final_answer")
 
