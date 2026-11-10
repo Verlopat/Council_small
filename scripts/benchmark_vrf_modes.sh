@@ -39,6 +39,8 @@ if bad:
     raise SystemExit("Sandbox isolation failed: "+", ".join(bad)+
                      ". Inspect "+sys.argv[1]+". No provider calls started.")
 PY
+python -m eval.run_manifest --root "$RUN_DIR" --experiment vrf \
+  --input "$PAPER_INDEX" --input council.yaml --options "$QUESTION"
 echo "Results directory: $RUN_DIR"
 
 for ((i=1; i<=COUNT; ++i)); do
