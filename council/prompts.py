@@ -34,13 +34,21 @@ Do not let a reviewer rewrite one security property into a different one.
 If no official reference was supplied, state limitations rather than
 pretending that a source was checked.
 Return ONE complete JSON object with required top-level keys:
-approach (nonempty string), claims (nonempty list), hypotheses (list of strings),
-experiments (list of strings), artifact (object).
+approach (nonempty string), final_answer (string), claims (nonempty list),
+hypotheses (list of strings), experiments (list of strings), artifact (object).
+For a numeric result, yes/no decision or code output COMPUTE the answer.
+Put only its final value in final_answer, e.g. "13", "yes", "106".
+For genuinely open research questions write final_answer="".
+Never replace the requested result with a plan or a suggestion to calculate it.
 If the task is numeric, code, or symbolic, optionally supply a SELF-WRITTEN
 check as artifact = {"kind":"python","code":"Python source ending in a printed
 JSON object with pass: true/false","valid_examples":[],"invalid_examples":[]}.
 For any other task or whenever a discriminating test cannot be supplied, use
 {"kind":"none","code":"","valid_examples":[],"invalid_examples":[]}.
+For numeric/code/symbolic tasks, Python artifact.code MAY compute the answer
+and print the final value as its LAST output line, e.g. print(106), instead
+of the legacy JSON pass/fail self-test. This is author consistency ONLY and
+will never certify correctness. Code MUST stay valid Python.
 Self-written tests are NOT independent verification or scientific proof;
 never claim to have run the artifact. Positive/negative examples (if supplied)
 must be complete standalone Python scripts that print final JSON pass booleans.
@@ -139,7 +147,9 @@ Choose a verification method appropriate to this claim's meaning, NOT the lowest
 available. Kinds: arithmetic, program, identity, satisfiability, paper_description,
 novelty, research_feasibility, universal.
 Return ONLY JSON: {"claim_kind":"...","scope":"...","assumptions":[],
-"artifact":{}}. For arithmetic use expression and expected int. For identity use left/right.
+"artifact":{}}. For arithmetic return {"expression":"98*7+2","expected":688}
+(the value MUST be the solver's claim, not guessed ground truth).
+For identity return {"left":"(x+1)*(x+5)","right":"x**2+6*x+5"}.
 For a program include a checker that emits final JSON pass, plus valid_examples,
 invalid_examples and limitation. A test does NOT prove a universal theorem.
 If the claim is only a definition, a cryptographic security game,
