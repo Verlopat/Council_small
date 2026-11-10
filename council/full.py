@@ -58,7 +58,11 @@ class FullCouncilRunner(CouncilRunner):
                  enable_relevance=False,critics=(),adaptive_seeds=False,
                  enable_repairs=True, caps=None, paper_index=None,
                  solver_strategies=None):
-        super().__init__(transport,events,budget,solvers=tuple(solvers))
+        # Validate against THIS run's configured roles, not historical
+        # CouncilRunner globals (which reserved "glm" as auditor).
+        super().__init__(transport,events,budget,solvers=tuple(solvers),
+                         judge_family=judge_family,
+                         auditor_family=auditor_family)
         self.assignment=Assignment(tuple(solvers),translator=translator_family,
                                    judge=judge_family,auditor=auditor_family)
         self.translator_family=translator_family
