@@ -196,5 +196,72 @@ class ScriptContractTests(unittest.TestCase):
             self.assertNotIn('rm -rf ',code)
 
 
+class RoleAndCliPolicyTests(unittest.TestCase):
+    def test_actual_role_assignment_not_legacy_global_role(self):
+        from council.families import validate_assignment
+        from council.budget import RunBudget
+        from council.events import EventStore
+        from council.full import FullCouncilRunner
+        validate_assignment(("gpt-oss","glm"),"gemini",None)
+        with tempfile.TemporaryDirectory() as td:
+            with EventStore(Path(td),"assignment") as events:
+                runner=FullCouncilRunner(
+                    None,events,RunBudget.start(40),
+                    solvers=("gpt-oss","glm"),
+                    translator_family="gemma",
+                    judge_family="gemini",
+                    auditor_family=None)
+                self.assertEqual(runner.assignment.solvers,("gpt-oss","glm"))
+                self.assertIsNone(runner.auditor_family)
+        with self.assertRaises(ValueError):
+            validate_assignment(("gpt-oss","gemini"),"gemini",None)
+
+    def test_cli_defaults_to_yaml_deadline_but_explicit_deadline_wins(self):
+        import contextlib
+        from io import StringIO
+        from council.cli import main
+        for overrides,expected in (([],600.0),(["--deadline","125"],125.0)):
+            with self.subTest(overrides=overrides):
+                output=StringIO()
+                with contextlib.redirect_stdout(output):
+                    result=main(["--mode","full","--dry-run",
+                                 *overrides,"Explain a security game"])
+                self.assertEqual(result,0)
+                self.assertEqual(json.loads(output.getvalue())["deadline"],
+                                 expected)
+
+    def test_cli_explicit_timeout_is_strict_and_default_is_configured(self):
+        import contextlib
+        from io import StringIO
+        from council.cli import main
+        observed=[]
+        class DummyTransport:
+            def __init__(self,**kwargs):
+                observed.append(kwargs)
+        class DummyQuick:
+            def __init__(self,*args,**kwargs):
+                pass
+            async def run(self,*args,**kwargs):
+                return {"research_result":{"completion_status":"partial"},
+                        "proposals":[]}
+        with tempfile.TemporaryDirectory() as temp:
+            for overrides,expected_strict,expected_timeout in (
+                    ([],False,28.0),(["--timeout","60"],True,60.0)):
+                with self.subTest(overrides=overrides):
+                    output=StringIO()
+                    with patch("council.cli.FamilyTransport",DummyTransport), \
+                         patch("council.full.QuickCouncilRunner",DummyQuick), \
+                         contextlib.redirect_stdout(output):
+                        result=main([
+                            "--mode","quick","--json","--run-dir",temp,
+                            "--run-id","a"+str(len(observed)),
+                            "--deadline","90",*overrides,
+                            "Explain a security game"])
+                    self.assertEqual(result,0)
+                    self.assertEqual(observed[-1]["strict_timeout"],
+                                     expected_strict)
+                    self.assertEqual(observed[-1]["timeout"],expected_timeout)
+
+
 if __name__=="__main__":
     unittest.main()
