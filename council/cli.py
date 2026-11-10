@@ -137,7 +137,7 @@ def main(argv=None) -> int:
     parser.add_argument("--mode", choices=("quick", "research", "full"), default="research")
     parser.add_argument("--deadline", type=float, default=300.0,
                         help="Total seconds, including synthesis and audit")
-    parser.add_argument("--timeout", type=float, default=28.0,
+    parser.add_argument("--timeout", type=float, default=None,
                         help="Per inference request timeout")
     parser.add_argument("--config", type=Path, default=Path("council.yaml"))
     parser.add_argument("--paper-index", type=Path,
@@ -217,7 +217,7 @@ def main(argv=None) -> int:
             transport = ReplayTransport(recorded)
             if args.resume:
                 transport = ResumeTransport(recorded,
-                    FamilyTransport(timeout=args.timeout, record=destination.record))
+                    FamilyTransport(timeout=args.timeout or 28.0, record=destination.record))
             budget = RunBudget.start(args.deadline,
                  reserve=min(20.0, args.deadline / 3))
             if mode == "quick" and metadata.get("pipeline") == "evidence":
@@ -262,7 +262,7 @@ def main(argv=None) -> int:
     question = " ".join(args.question).strip()
     if not question:
         parser.error("Provide a research question, --list-families or --replay")
-    if args.deadline <= 0 or args.timeout <= 1:
+    if args.deadline <= 0 or (args.timeout is not None and args.timeout <= 1):
         parser.error("Deadline and timeout must be positive")
     cfg = None
     if args.mode in ("quick", "full"):
@@ -293,8 +293,9 @@ def main(argv=None) -> int:
     run_id = args.run_id or uuid.uuid4().hex[:16]
     budget = RunBudget.start(args.deadline, reserve=min(20.0, args.deadline / 3))
     with EventStore(args.run_dir, run_id) as events:
-        transport = FamilyTransport(timeout=(cfg.per_call_timeout if cfg else args.timeout),
-                                    record=events.record)
+        transport = FamilyTransport(timeout=(
+            args.timeout if args.timeout is not None else
+            cfg.per_call_timeout if cfg else 28.0), record=events.record)
         if cfg:
             for provider, settings in cfg.rate_limits.items():
                 for family in FAMILIES.values():
