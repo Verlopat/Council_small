@@ -73,33 +73,56 @@ def load_runs(folder: Path, count: int) -> list[dict]:
 
 
 def ensure_scores(path:Path, runs:list[dict]) -> dict[tuple[str,int,str],float]:
-    """Create missing annotation rows without overwriting human grades."""
-    existing={}
+    """Append new annotation rows without erasing existing manual scores.
+
+    Re-running a larger experiment must not silently lose or hide the
+    previously entered manual grades. Grade only actually present runs.
+    """
+    existing:dict[tuple[str,int,str],float]={}
+    all_rows:dict[tuple[str,int,str],dict]={}
     if path.is_file():
         with path.open(newline="",encoding="utf-8") as source:
-            for item in csv.DictReader(source):
-                if not all(k in item for k in FIELDS):
-                    raise ValueError("Score file missing required columns")
-                key=(item["mode"],int(item["run"]),item["game"])
+            reader=csv.DictReader(source)
+            if not reader.fieldnames or any(k not in reader.fieldnames
+                                            for k in FIELDS):
+                raise ValueError("Score file missing required columns")
+            for item in reader:
+                try:
+                    key=(item["mode"],int(item["run"]),item["game"])
+                except (ValueError,TypeError,KeyError) as exc:
+                    raise ValueError("Invalid existing annotation row") from exc
+                if (key[0] not in {"quick","full"} or key[1]<1 or
+                        key[2] not in GAMES or key in all_rows):
+                    raise ValueError("Invalid or duplicate annotation key")
                 score=(item.get("correctness") or "").strip()
                 if score:
-                    value=float(score)
+                    try:
+                        value=float(score)
+                    except ValueError as exc:
+                        raise ValueError("Invalid correctness score") from exc
                     if not 0<=value<=1:
                         raise ValueError("Correctness must be between 0 and 1")
                     existing[key]=value
-    if not path.exists():
+                all_rows[key]={f:item.get(f,"") for f in FIELDS}
+    added=False
+    for item in runs:
+        if not item.get("found"):
+            continue
+        for game in GAMES:
+            key=(item["mode"],item["run"],game)
+            if key in all_rows:
+                continue
+            all_rows[key]={"mode":item["mode"],"run":item["run"],
+                           "game":game,"correctness":"","notes":
+                           "0=wrong, 0.5=partially right, 1=correct; compare to RFC 9381"}
+            added=True
+    if added or not path.exists():
         path.parent.mkdir(parents=True,exist_ok=True)
         with path.open("w",newline="",encoding="utf-8") as dest:
             writer=csv.DictWriter(dest,fieldnames=FIELDS)
             writer.writeheader()
-            for item in runs:
-                if not item["found"]:
-                    continue
-                for game in GAMES:
-                    writer.writerow({"mode":item["mode"],"run":item["run"],
-                                     "game":game,"correctness":"","notes":
-                                     "0=wrong, 0.5=partially right, 1=correct; "
-                                     "compare to RFC 9381"})
+            for key in sorted(all_rows):
+                writer.writerow(all_rows[key])
     return existing
 
 
