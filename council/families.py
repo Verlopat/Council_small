@@ -38,14 +38,16 @@ FAMILIES: dict[str, Family] = {
                       counts_for_quorum=False),
 }
 
-def validate_assignment(solvers: tuple[str, ...], judge: str, auditor: str) -> None:
+def validate_assignment(solvers: tuple[str, ...], judge: str,
+                        auditor: str | None) -> None:
     if len(set(solvers)) != len(solvers):
         raise ValueError("Solver families must be distinct")
-    if len(solvers) < 1 or any(f not in FAMILIES for f in (*solvers, judge, auditor)):
+    roles=(*solvers,judge)+((auditor,) if auditor is not None else ())
+    if len(solvers) < 1 or any(f not in FAMILIES for f in roles):
         raise ValueError("Unknown or missing model family")
-    if judge in solvers or judge == auditor:
+    if judge in solvers or (auditor is not None and judge == auditor):
         raise ValueError("Judge family must be reserved and isolated")
-    if auditor in solvers:
+    if auditor is not None and auditor in solvers:
         raise ValueError("Auditor family must be separate from solvers")
 
 def quorum(families: set[str]) -> int:
