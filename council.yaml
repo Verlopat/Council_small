@@ -1,5 +1,6 @@
 # Corrected v4: three independent proposals, with a separate auditor.
-# To use four solvers, reserve a seventh independent auditor family.
+# Four solvers require either a distinct auditor family or auditor: null.
+# Never reuse a solver as its own auditor. The missing audit must be reported.
 mode: full
 deadline_seconds: 600
 per_call_timeout: 28
