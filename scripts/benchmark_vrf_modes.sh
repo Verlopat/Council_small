@@ -3,12 +3,14 @@
 # Run at repository root: bash scripts/benchmark_vrf_modes.sh
 set -euo pipefail
 
-if [[ ! -f runs/papers.sqlite3 ]]; then
-  echo "Missing runs/papers.sqlite3. Index RFC 9381 before benchmarking." >&2
+if [[ ! -f "${PAPER_INDEX:-runs/papers.sqlite3}" ]]; then
+  echo "Missing paper index: ${PAPER_INDEX:-runs/papers.sqlite3}. Index RFC 9381 before benchmarking." >&2
   exit 2
 fi
 
 COUNT="${COUNT:-5}"
+RUN_DIR="${RUN_DIR:-runs}"
+PAPER_INDEX="${PAPER_INDEX:-runs/papers.sqlite3}"
 if ! [[ "$COUNT" =~ ^[1-9][0-9]*$ ]] || (( COUNT > 100 )); then
   echo "COUNT must be an integer between 1 and 100" >&2
   exit 2
@@ -23,11 +25,25 @@ if ! [[ "$PAUSE_SECONDS" =~ ^[0-9]+$ ]]; then
   exit 2
 fi
 previous_call=0
-mkdir -p runs
+mkdir -p "$RUN_DIR"
+# This command does not contact any model provider and fails closed if a
+# previously observed sandbox isolation defect is still present.
+python -m council.preflight --json > "$RUN_DIR/preflight.json"
+python - "$RUN_DIR/preflight.json" <<'PY'
+import json,sys
+report=json.load(open(sys.argv[1],encoding="utf-8"))
+required=("execution","network_isolation","host_home_isolation",
+          "environment_isolation")
+bad=[k for k in required if report.get(k,{}).get("status")!="pass"]
+if bad:
+    raise SystemExit("Sandbox isolation failed: "+", ".join(bad)+
+                     ". Inspect "+sys.argv[1]+". No provider calls started.")
+PY
+echo "Results directory: $RUN_DIR"
 
 for ((i=1; i<=COUNT; ++i)); do
   for mode in quick full; do
-    target="runs/${mode}_${i}.json"
+    target="$RUN_DIR/${mode}_${i}.json"
     if [[ -f "$target" ]]; then
       if python -m json.tool "$target" > /dev/null 2>&1; then
         echo "Preserving existing $target"
@@ -47,9 +63,10 @@ for ((i=1; i<=COUNT; ++i)); do
     echo "Running $mode sample $i/$COUNT (provider quotas and deadlines apply)"
     if ! python -m council.cli \
         --mode "$mode" --deadline "$deadline" --timeout 60 \
-        --paper-index runs/papers.sqlite3 --json "$QUESTION" \
-        > "$tmp" 2> "runs/${mode}_${i}.stderr.log"; then
-      echo "Run failed; inspect $tmp and runs/${mode}_${i}.stderr.log" >&2
+        --paper-index "$PAPER_INDEX" --run-dir "$RUN_DIR" \
+        --json "$QUESTION" \
+        > "$tmp" 2> "$RUN_DIR/${mode}_${i}.stderr.log"; then
+      echo "Run failed; inspect $tmp and $RUN_DIR/${mode}_${i}.stderr.log" >&2
       exit 1
     fi
     if ! python -m json.tool "$tmp" > /dev/null; then
@@ -60,7 +77,7 @@ for ((i=1; i<=COUNT; ++i)); do
   done
 done
 
-python -m eval.compare_vrf_modes --input-dir runs --count "$COUNT" \
-  --scores runs/vrf_human_scores.csv
-echo "Fill the correctness column in runs/vrf_human_scores.csv, then rerun"
-echo "python -m eval.compare_vrf_modes --input-dir runs --count $COUNT --scores runs/vrf_human_scores.csv"
+python -m eval.compare_vrf_modes --input-dir "$RUN_DIR" --count "$COUNT" \
+  --scores "$RUN_DIR/vrf_human_scores.csv"
+echo "Fill the correctness column in $RUN_DIR/vrf_human_scores.csv, then rerun"
+echo "python -m eval.compare_vrf_modes --input-dir $RUN_DIR --count $COUNT --scores $RUN_DIR/vrf_human_scores.csv"
