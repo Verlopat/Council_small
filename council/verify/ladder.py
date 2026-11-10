@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import json
+import re
 
 from council.translate import VerificationPlan
 from council.verify.arithmetic import check as arithmetic_check
@@ -25,11 +26,38 @@ def verify(plan: VerificationPlan, artifact: dict, *,
     digest = hashlib.sha256(json.dumps(artifact, sort_keys=True).encode()).hexdigest()
     try:
         if plan.check_kind == "arithmetic":
-            result = arithmetic_check(artifact["expression"], artifact["expected"])
+            # Providers may use expected_int instead of expected.
+            # Reject conflicting aliases rather than silently choosing one.
+            keys=("expected","expected_int","expected_value",
+                  "expected_result","result","value")
+            values=[artifact[key] for key in keys if key in artifact]
+            if not values:
+                raise KeyError("expected")
+            def as_int(value):
+                if type(value) is int:
+                    return value
+                if isinstance(value,str):
+                    raw=value.replace(",","").strip()
+                    if re.fullmatch(r"[+-]?\d+",raw):
+                        return int(raw)
+                raise ValueError("Expected result must be an integer")
+            expected=as_int(values[0])
+            if any(as_int(x)!=expected for x in values[1:]):
+                raise ValueError("Conflicting expected aliases")
+            result = arithmetic_check(artifact["expression"], expected)
             return VerificationOutcome(result.outcome, "arithmetic", result.scope,
                                        digest, result.limitation)
         if plan.check_kind == "sympy":
-            result = identity(artifact["left"], artifact["right"])
+            left=artifact.get("left",artifact.get("lhs"))
+            right=artifact.get("right",artifact.get("rhs"))
+            if left is None or right is None:
+                raise KeyError("left/right")
+            if ("left" in artifact and "lhs" in artifact
+                    and left!=artifact["lhs"]) or (
+                    "right" in artifact and "rhs" in artifact
+                    and right!=artifact["rhs"]):
+                raise ValueError("Conflicting symbolic aliases")
+            result = identity(left, right)
             return VerificationOutcome(result.outcome, "symbolic", plan.scope,
                                        digest, "Symbolic expressions checked inside sandbox")
         if plan.check_kind == "z3":
