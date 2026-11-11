@@ -118,9 +118,9 @@ class CacheTests(unittest.TestCase):
         result = self.run_router(router, candidates)
         self.assertEqual(result[1].provider, "Groq")
         self.assertNotIn("second", [call[1] for call in router.calls])
-        self.assertEqual(self.cache().blocked("LLM7.io", "second")[1], 120)
+        self.assertEqual(self.cache().blocked("LLM7.io", "second", "same")[1], 120)
         self.clock.advance(121)
-        self.assertIsNone(self.cache().blocked("LLM7.io", "second"))
+        self.assertIsNone(self.cache().blocked("LLM7.io", "second", "same"))
 
     def test_separate_quota_group_allows_backup(self):
         def limited(call):
