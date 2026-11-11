@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Two quick + two full Phase-A replicates; no automatic baseline API calls.
+# Quick/full Phase-A replicates; baselines are explicit opt-in.
 set -euo pipefail
 RUN_DIR="${RUN_DIR:-runs/phase_a_verify}"
 COUNT="${COUNT:-2}"
@@ -7,6 +7,20 @@ MAX_TASKS="${MAX_TASKS:-3}"
 PAUSE_SECONDS="${PAUSE_SECONDS:-90}"
 TASK_FILE="${TASK_FILE:-eval/tasks/phase_a_dev.jsonl}"
 SPLIT="${SPLIT:-dev}"
+BASELINES="${BASELINES:-0}"
+BASELINE_SAMPLES="${BASELINE_SAMPLES:-2}"
+if [[ "$BASELINES" != "0" && "$BASELINES" != "1" ]]; then
+  echo "BASELINES must be 0 or 1" >&2
+  exit 2
+fi
+if [[ ! "$BASELINE_SAMPLES" =~ ^[1-9][0-9]*$ ]] || (( BASELINE_SAMPLES > 55 )); then
+  echo "BASELINE_SAMPLES must be 1..55" >&2
+  exit 2
+fi
+baseline_args=(--no-baselines)
+if [[ "$BASELINES" == "1" ]]; then
+  baseline_args=(--baseline-samples "$BASELINE_SAMPLES" --skip-vote6)
+fi
 if [[ "$SPLIT" != "dev" && "$SPLIT" != "heldout" ]]; then
   echo "SPLIT must be dev or heldout" >&2
   exit 2
@@ -44,7 +58,7 @@ PY
 
 python -m eval.run_manifest --root "$RUN_DIR" --experiment phase_a \
   --input "$TASK_FILE" --input council.yaml \
-  --options "$SPLIT:$MAX_TASKS"
+  --options "$SPLIT:$MAX_TASKS:baselines=$BASELINES:samples=$BASELINE_SAMPLES"
 previous_call=0
 for ((i=1; i<=COUNT; ++i)); do
   for mode in quick full; do
@@ -87,7 +101,7 @@ PY
     python -m eval.execute --tasks "$TASK_FILE" \
       --split "$SPLIT" \
       --mode "$mode" --max-tasks "$MAX_TASKS" \
-      --deadline "$deadline" --no-baselines \
+      --deadline "$deadline" "${baseline_args[@]}" \
       --out "$out" --confirm-free \
       2>&1 | tee "$out/console.log"
   done

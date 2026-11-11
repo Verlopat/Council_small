@@ -178,6 +178,36 @@ Zero false verifications when no answers were verified is a zero-certification
 observation, not evidence of general verification reliability. Word-problem and
 symbolic answer checks still require independent claim-to-check alignment.
 
+## Final executed-answer comparison (November 12)
+
+Scalar selection now follows: independently verified answer, unique agreement
+between at least two distinct families' sandbox-executed values, one
+self-consistent executed proposal, otherwise no answer. Printed values are
+retained even when they disagree with the stated answer. Agreement is labeled
+`executed_agreement_not_formal_proof`; it never sets `verified=1`. Stale artifact
+hashes/claim versions and duplicate families cannot supply agreement.
+`Final answer: yes` is accepted in the structured scalar field. A passing
+independent SymPy check may verify a yes answer only for a literal matching
+polynomial identity in the question; broader semantic alignment stays closed.
+
+After confirming free provider quotas, run exactly one quick/full pair on the
+first 30 development tasks (10 numeric, 10 code, 10 symbolic):
+
+```bash
+RUN_DIR=runs/phase_a_final_nov12 COUNT=1 MAX_TASKS=30 \
+  BASELINES=1 BASELINE_SAMPLES=2 PAUSE_SECONDS=120 \
+  bash scripts/benchmark_phase_a_modes.sh
+```
+
+Use a fresh output directory. The script checks sandbox isolation, preserves
+completed runs and disables six-family voting. The preregistered operational
+threshold is full mode at least three more correct tasks than each baseline,
+with zero false verifications. This is a decision threshold, not a statistical
+significance claim. Existing best-of-N has only numeric/code coverage, and
+numeric selection is oracle-assisted; it cannot establish an all-30 fair
+best-of-N comparison. Keep these baseline limits explicit in the final decision.
+No new model-performance result is established by the offline tests.
+
 ## Safety and limitations
 
 - **Sandbox:** Generated verification code executes only in fail-closed bubblewrap isolation. Check deployment with `python -m council.preflight --json`. SymPy and Z3 are declared dependencies; Lean/Tamarin/ProVerif are optional external tools.

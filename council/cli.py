@@ -22,6 +22,12 @@ def print_compact_result(result: dict, run_id: str, run_dir: Path) -> None:
     candidates=result.get("candidate_answers") or {}
     if verified is not None:
         print("Evidence-supported scoped final answer: "+str(verified))
+    elif (result.get("answer_selection") or {}).get("answer") is not None:
+        selection=result["answer_selection"]
+        label=("Executed agreement (not a formal proof)" if
+               selection.get("basis")=="executed_agreement_not_formal_proof" else
+               "Self-consistent execution (unverified)")
+        print(label+": "+str(selection["answer"]))
     elif candidates:
         visible=[str(x)+": "+str(v) for x,v in candidates.items() if v is not None]
         if visible:
@@ -433,6 +439,9 @@ def main(argv=None) -> int:
         if result.get("final_answer") is not None:
             print("\nEvidence-supported scoped final answer: "+
                   str(result["final_answer"]))
+        elif (result.get("answer_selection") or {}).get("answer") is not None:
+            selection=result["answer_selection"]
+            print("\nSelected scalar ("+str(selection["basis"])+"): "+str(selection["answer"]))
         elif result.get("candidate_answers"):
             print("\nUnverified candidate answers: "+
                   str(result["candidate_answers"]))

@@ -27,6 +27,7 @@ def normalize_answer(value:object)->str|None:
         return None
     item=value.strip().strip(chr(96)).strip().replace("**","")
     item=item.strip().strip('"').strip("'").strip()
+    item=re.sub(r"(?i)^final\s+answer\s*[:=]\s*", "", item).strip()
     if re.fullmatch(NUM,item):
         return item.replace(",","")
     if re.fullmatch(r"(?i)(?:yes|no|true|false)",item):
@@ -177,3 +178,70 @@ def select_candidate_answer(candidates:dict, claims, evidence, proposals=()):
                      'unaligned_answer_check_failed_unverified' if rank<0 else
                      'first_eligible_unverified_candidate'),
             'excluded':excluded}
+
+
+def executed_answer_selection(proposals,claims,evidence,verified=None):
+    """Verified scalar > distinct-family executed agreement > self-consistency.
+
+    Execution is evidence about the submitted code, not its interpretation
+    of the question. A corrected printed value never inherits verification
+    evidence for the author's different stated answer.
+    """
+    import hashlib
+    from decimal import Decimal,InvalidOperation
+    from dataclasses import asdict,is_dataclass
+    def canonical(value):
+        scalar=normalize_answer(value)
+        if scalar in {"yes","true"}:return "yes"
+        if scalar in {"no","false"}:return "no"
+        if scalar is None:return None
+        try:
+            number=Decimal(scalar)
+            return format(number.normalize(),"f") if number.is_finite() else None
+        except InvalidOperation:
+            return None
+    claim_map={c["id"]:c for c in
+               (asdict(c) if is_dataclass(c) else c for c in claims)}
+    if verified is not None:
+        return {"answer":verified,"proposal_id":next((p['id'] for p in proposals
+                if canonical(p.get('final_answer'))==canonical(verified)),None),
+                "basis":"independently_verified_answer","families":[]}
+    executions=[]
+    for p in proposals:
+        value=canonical(p.get('executed_answer'))
+        code=(p.get('artifact') or {}).get('code')
+        claim=claim_map.get(p.get('answer_claim_id'))
+        if (value is None or not p.get('family') or not isinstance(code,str)
+                or claim is None
+                or p.get('executed_claim_version')!=claim.get('version')
+                or p.get('executed_artifact_hash')!=hashlib.sha256(code.encode()).hexdigest()):
+            continue
+        executions.append((p,value))
+    per_family={}
+    for p,value in executions:
+        per_family.setdefault(p['family'],set()).add(value)
+    by_value={}
+    for family,values in per_family.items():
+        if len(values)==1:
+            by_value.setdefault(next(iter(values)),set()).add(family)
+    agreements=[v for v,families in by_value.items() if len(families)>=2]
+    if len(agreements)==1:
+        value=agreements[0]
+        p=next(p for p,v in executions if v==value and p['family'] in by_value[value])
+        return {"answer":value,"proposal_id":p['id'],
+                "basis":"executed_agreement_not_formal_proof",
+                "families":sorted(by_value[value])}
+    if len(agreements)>1:
+        return {"answer":None,"proposal_id":None,
+                "basis":"conflicting_executed_agreements","families":[]}
+    for p,value in executions:
+        if (len(per_family[p['family']])==1
+                and canonical(p.get('final_answer'))==value):
+            # Preserve contradiction gating for the unchanged stated answer.
+            choice=select_candidate_answer({p['id']:value},claim_map.values(),evidence,[p])
+            if choice['answer'] is not None:
+                return {"answer":value,"proposal_id":p['id'],
+                        "basis":"self_consistent_execution_unverified",
+                        "families":[p['family']]}
+    return {"answer":None,"proposal_id":None,
+            "basis":"no_verified_or_executed_answer","families":[]}

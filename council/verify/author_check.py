@@ -38,7 +38,8 @@ def _canonical(value:object)->str|None:
         return None
 
 
-def recompute_answer(code:str,claimed:str,*,timeout:float=8)->tuple[str,str]:
+def recompute_answer(code:str,claimed:str,*,timeout:float=8,
+                     capture:dict|None=None)->tuple[str,str]:
     """Return (pass|fail|error,detail); no run outside bubblewrap."""
     if not isinstance(code,str) or not code.strip():
         return "error","missing_code"
@@ -64,4 +65,6 @@ def recompute_answer(code:str,claimed:str,*,timeout:float=8)->tuple[str,str]:
     computed=_canonical(output)
     if computed is None:
         return "error","printed_value_not_scalar"
+    if capture is not None:
+        capture["value"]=computed
     return ("pass" if computed==want else "fail"),("printed="+computed[:90])

@@ -103,7 +103,7 @@ async def run_task(task,transport,events,*,deadline,baseline_samples=0,
     final=council.get("final_answer")
     candidates=council.get("candidate_answers") or {}
     # Selected/deployable candidate: first verified answer if available,
-    # otherwise the first original solver's extracted final answer.
+    # otherwise the explicit executed-answer tier selected by the runner.
     # "Any candidate correct" is an ORACLE UPPER BOUND, never the
     # deployed predictor or an improvement claim.
     selection=council.get("answer_selection") or select_candidate_answer(
@@ -114,6 +114,7 @@ async def run_task(task,transport,events,*,deadline,baseline_samples=0,
             "mode":mode,"system":"council","answer":selected,
             "candidate_answers":candidates,"verified_answer":final,
             "answer_selection":selection,
+            "executed_agreement_answer":council.get("executed_agreement_answer"),
             "calls":model_calls,"equal_budget":True,"latency":time.monotonic()-initial,
             "unresolved":council.get("verdict",{}).get("status")!="answer",
             "composition_unchecked":council.get("composition",{}).get("outcome")=="unchecked"}

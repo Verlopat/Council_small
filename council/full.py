@@ -32,7 +32,7 @@ from council.translate import plan, decisive_if_supported
 from council.verify.ladder import verify
 from council.compose import compose_answer
 from council.workflow import CouncilRunner
-from council.final_answers import select_candidate_answer, proposal_answers, extract_final_answer, normalize_answer
+from council.final_answers import executed_answer_selection, proposal_answers, extract_final_answer, normalize_answer
 from council.requirements import Requirements
 from council.vrf_sanity import scan_vrf_games, unsupported_full_sk_secrecy
 from council.vrf_audit import (scan_audit_issues, objection_conflicts,
@@ -370,6 +370,9 @@ class FullCouncilRunner(CouncilRunner):
         Mutation testing uses supplied positive and negative fixtures when
         available; a bare JSON-pass script is explicitly NOT mutation-tested.
         """
+        for key in ("executed_answer","executed_artifact_hash","executed_claim_version"):
+            proposal.pop(key,None)
+        captured={}
         data=proposal.get("artifact") or {}
         if not isinstance(data,dict) or data.get("kind")!="python":
             return
@@ -394,7 +397,7 @@ class FullCouncilRunner(CouncilRunner):
         try:
             if recomputed:
                 outcome,detail=await asyncio.to_thread(
-                    recompute_answer,code,final,timeout=6)
+                    recompute_answer,code,final,timeout=6,capture=captured)
                 mutated=False
             elif mutation_requested:
                 spec=CheckSpecification(
@@ -414,6 +417,10 @@ class FullCouncilRunner(CouncilRunner):
         except (TypeError,ValueError,KeyError):
             outcome,detail,mutated="error","invalid author artifact",False
         digest=hashlib.sha256(code.encode("utf-8")).hexdigest()
+        if recomputed and outcome in {"pass","fail"} and captured.get("value") is not None:
+            proposal["executed_answer"]=captured["value"]
+            proposal["executed_artifact_hash"]=digest
+            proposal["executed_claim_version"]=claim.version
         ev=Evidence(id="e"+str(len(self.ledger.evidence)+1),
                     claim_id=claim.id,claim_version=claim.version,
                     kind=EvidenceKind.TEST,outcome=outcome,
@@ -425,6 +432,7 @@ class FullCouncilRunner(CouncilRunner):
         self.events.record("author_artifact_checked",
                            proposal_id=proposal["id"],claim_id=claim.id,
                            outcome=outcome,detail=detail,
+                           executed_answer=proposal.get("executed_answer"),
                            mutation_tested=mutation_requested and not recomputed,
                            discriminating=mutated,
                            author_answer_consistency=recomputed,
@@ -633,6 +641,13 @@ class FullCouncilRunner(CouncilRunner):
         independent=(result.kind=="arithmetic"
                      and not claim.needs_re_evaluation
                      and self._literal_arithmetic_alignment(claim.statement,artifact))
+        if (claim.id.endswith(":answer") and result.kind=="symbolic"
+                and result.outcome=="pass" and first_family and first_family!=claim.owner_family
+                and normalize_answer(claim.statement.removeprefix(
+                    "Reported final scalar result: ")) in {"yes","true"}
+                and self._literal_identity_alignment(question,artifact)):
+            claim.needs_re_evaluation=False
+            independent=True
         if evidence_kind is EvidenceKind.SOURCE:
             independent=False
             document_id=artifact.get("document_id")
@@ -680,6 +695,39 @@ class FullCouncilRunner(CouncilRunner):
         return (bool(match)
                 and match.group(1).strip()==str(artifact.get("expression","")).strip()
                 and str(expected).replace(",","")==match.group(2))
+
+    @staticmethod
+    def _literal_identity_alignment(question,artifact):
+        # Deliberately narrow: literal polynomial identity questions with no
+        # domain restrictions, functions or model-supplied assumptions.
+        import ast
+        match=re.fullmatch(
+            r"(?is)\s*For all real ([a-z]), is (.+?) equal to (.+?)\?"
+            r"(?:\s*Explain briefly, then finish with exactly 'Final answer: yes' "
+            r"or 'Final answer: no'\.)?\s*",question)
+        if not match:return False
+        var,left,right=match.groups()
+        if (artifact.get("left",artifact.get("lhs"))!=left
+                or artifact.get("right",artifact.get("rhs"))!=right):
+            return False
+        def polynomial(text):
+            try:root=ast.parse(text,mode="eval")
+            except (SyntaxError,ValueError):return False
+            def valid(n,depth=0):
+                if depth>40:return False
+                if isinstance(n,ast.Expression):return valid(n.body,depth+1)
+                if isinstance(n,ast.Name):return n.id==var
+                if isinstance(n,ast.Constant):return type(n.value) is int and abs(n.value)<=10**12
+                if isinstance(n,ast.UnaryOp) and isinstance(n.op,(ast.UAdd,ast.USub)):
+                    return valid(n.operand,depth+1)
+                if isinstance(n,ast.BinOp) and isinstance(n.op,(ast.Add,ast.Sub,ast.Mult)):
+                    return valid(n.left,depth+1) and valid(n.right,depth+1)
+                if isinstance(n,ast.BinOp) and isinstance(n.op,ast.Pow):
+                    return (valid(n.left,depth+1) and isinstance(n.right,ast.Constant)
+                            and type(n.right.value) is int and 0<=n.right.value<=32)
+                return False
+            return valid(root)
+        return polynomial(left) and polynomial(right)
 
     def _missing_solver_actions(self,proposals:list[dict])->list[str]:
         present={p["family"] for p in proposals}
@@ -944,9 +992,9 @@ class FullCouncilRunner(CouncilRunner):
             "requirements":req.as_data(),"actual_models":self.actual_models,
             "final_answer":None,  # peer-independent checks did not run
             "candidate_answers":proposal_answers(proposals,self.ledger)[1],
-            "answer_selection":select_candidate_answer(
-                proposal_answers(proposals,self.ledger)[1],
-                self.ledger.claims.values(),self.ledger.evidence.values(),proposals),
+            "answer_selection":executed_answer_selection(
+                proposals,self.ledger.claims.values(),self.ledger.evidence.values(),
+                proposal_answers(proposals,self.ledger)[0]),
             "advisory_findings":findings,"reference_checks":self.reference_checks,
             "topic_consolidation":topics,
             "audit_advisory_findings":audit_advisories,
@@ -969,6 +1017,15 @@ class FullCouncilRunner(CouncilRunner):
                 bool(row.get("best_version_id")) for row in topics),
             auditor_completed=bool(audit),
             independent_proposals=len(proposals))
+        selection=result.get("answer_selection") or executed_answer_selection(
+            proposals,self.ledger.claims.values(),self.ledger.evidence.values(),
+            result.get("final_answer"))
+        result["answer_selection"]=selection
+        result["selected_answer"]=selection["answer"]
+        executed=executed_answer_selection(
+            proposals,self.ledger.claims.values(),self.ledger.evidence.values())
+        result["executed_agreement_answer"]=(executed["answer"] if
+            executed["basis"]=="executed_agreement_not_formal_proof" else None)
         self.events.record("run_finished",result=result)
         return result
 
@@ -1527,6 +1584,15 @@ class FullCouncilRunner(CouncilRunner):
                     "warnings":self.warnings}
             if hasattr(self.events,"db") and hasattr(self.events,"run_id"):
                 SQLiteLedger(self.events.db).save(self.events.run_id,self.ledger)
+            selection=result.get("answer_selection") or executed_answer_selection(
+                proposals,self.ledger.claims.values(),self.ledger.evidence.values(),
+                result.get("final_answer"))
+            result["answer_selection"]=selection
+            result["selected_answer"]=selection["answer"]
+            executed=executed_answer_selection(
+                proposals,self.ledger.claims.values(),self.ledger.evidence.values())
+            result["executed_agreement_answer"]=(executed["answer"] if
+                executed["basis"]=="executed_agreement_not_formal_proof" else None)
             self.events.record("run_finished",result=result)
             return result
         for i,p in enumerate(proposals):
@@ -2172,9 +2238,9 @@ class FullCouncilRunner(CouncilRunner):
             "grounded_objection_verdicts":grounded,
             "final_answer":proposal_answers(proposals,self.ledger)[0],
             "candidate_answers":proposal_answers(proposals,self.ledger)[1],
-            "answer_selection":select_candidate_answer(
-                proposal_answers(proposals,self.ledger)[1],
-                self.ledger.claims.values(),self.ledger.evidence.values(),proposals),
+            "answer_selection":executed_answer_selection(
+                proposals,self.ledger.claims.values(),self.ledger.evidence.values(),
+                proposal_answers(proposals,self.ledger)[0]),
             "translators_used":dict(self._translator_used),
             "translator_families_unavailable":sorted(self._translators_down),
             "topic_consolidation":topic_consolidation,
@@ -2192,6 +2258,15 @@ class FullCouncilRunner(CouncilRunner):
             "warnings":self.warnings}
         if hasattr(self.events,"db") and hasattr(self.events,"run_id"):
             SQLiteLedger(self.events.db).save(self.events.run_id,self.ledger)
+        selection=result.get("answer_selection") or executed_answer_selection(
+            proposals,self.ledger.claims.values(),self.ledger.evidence.values(),
+            result.get("final_answer"))
+        result["answer_selection"]=selection
+        result["selected_answer"]=selection["answer"]
+        executed=executed_answer_selection(
+            proposals,self.ledger.claims.values(),self.ledger.evidence.values())
+        result["executed_agreement_answer"]=(executed["answer"] if
+            executed["basis"]=="executed_agreement_not_formal_proof" else None)
         self.events.record("run_finished",result=result)
         return result
 
