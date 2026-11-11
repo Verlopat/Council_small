@@ -692,10 +692,22 @@ class FullCouncilRunner(CouncilRunner):
     def _literal_arithmetic_alignment(statement,artifact):
         import re
         match=re.fullmatch(r"\s*([^=]+)\s*=\s*([+-]?\d+)\s*",statement)
-        expected=artifact.get("expected",artifact.get("expected_int"))
-        return (bool(match)
+        aliases=("expected","expected_int","expected_value",
+                 "expected_result","result","value")
+        values=[artifact[key] for key in aliases if key in artifact]
+        if not values:
+            return False
+        try:
+            integers=[int(str(value).replace(",","").strip()) for value in values
+                      if type(value) is int or
+                         (isinstance(value,str) and
+                          re.fullmatch(r"[+-]?\d+",value.replace(",","").strip()))]
+        except (TypeError,ValueError):
+            return False
+        return (bool(match) and len(integers)==len(values)
+                and len(set(integers))==1
                 and match.group(1).strip()==str(artifact.get("expression","")).strip()
-                and str(expected).replace(",","")==match.group(2))
+                and integers[0]==int(match.group(2)))
 
     @staticmethod
     def _literal_identity_alignment(question,artifact):
@@ -1748,12 +1760,24 @@ class FullCouncilRunner(CouncilRunner):
             else:
                 self.warnings.append("Independent revision recheck unavailable for "+p["id"])
         claims=list(self.ledger.claims.values())
+        def natural_key(claim):
+            return (not claim.id.endswith(":answer"),
+                    tuple(int(x) if x.isdigit() else x
+                          for x in re.split(r"(\d+)",claim.id)))
         if mode=="quick":
-            claims=sorted(claims,
-                          key=lambda c:(not c.id.endswith(":answer"),c.id))[:1]
+            claims=sorted(claims,key=natural_key)[:1]
         else:
-            claims=sorted(claims,
-                          key=lambda c:(not c.id.endswith(":answer"),c.id))[:self.max_claims]
+            # Round-robin by proposal, with natural numeric ordering inside it.
+            buckets={}
+            for claim in sorted(claims,key=natural_key):
+                buckets.setdefault(claim.id.split(":",1)[0],[]).append(claim)
+            claims=[]
+            while any(buckets.values()) and len(claims)<self.max_claims:
+                for pid in sorted(buckets,key=lambda p:
+                                  (0,int(p[1:])) if p.startswith("p") and
+                                  p[1:].isdigit() else (1,p)):
+                    if buckets[pid] and len(claims)<self.max_claims:
+                        claims.append(buckets[pid].pop(0))
         for claim in claims:
             if self.budget.debate_remaining()<1:break
             await self._translate_and_check(claim)
@@ -1824,11 +1848,13 @@ class FullCouncilRunner(CouncilRunner):
             # No new verifier evidence => do not start further debate rounds.
         # P4: at most one repair attempt for each remaining challenged claim.
         # The rewritten claim loses its old evidence and requires fresh anchoring.
-        for c in list(self.ledger.claims.values())[:self.hunter_cap]:
+        unresolved=[c for c in self.ledger.claims.values()
+                    if c.status is ClaimStatus.UNRESOLVED]
+        for c in unresolved[:self.hunter_cap]:
             if not self.enable_repairs or self.budget.debate_remaining()<=3:break
-            if c.status is not ClaimStatus.UNRESOLVED:continue
-            repairer=next((f for f in ("nemotron","command","gpt-oss")
-                           if f!=c.owner_family),None)
+            repairer=next((f for f in (*self.solvers,self.translator_family)
+                           if f!=c.owner_family and
+                              f not in {self.judge_family,self.auditor_family}),None)
             if not repairer:continue
             game_warnings=scan_vrf_games(question,[c])
             definition=definition_kind(question,c.statement)
