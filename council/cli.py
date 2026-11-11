@@ -398,7 +398,8 @@ def main(argv=None) -> int:
             config=asdict(cfg) if cfg is not None else None,
             rate_limits=cfg.rate_limits if cfg else {},
             deadline_seconds=args.deadline,
-            per_call_timeout=transport.timeout,
+            per_call_timeout=getattr(transport,"timeout",
+                args.timeout or (cfg.per_call_timeout if cfg else 28.0)),
             paper_index_path=str(args.paper_index) if args.paper_index else None)
         try:
             result = asyncio.run(runner.run(question, mode=args.mode))
