@@ -223,6 +223,17 @@ def main(argv=None) -> int:
                          if e["event"] == "run_started"), None)
         if metadata is None:
             parser.error("Checkpoint has no start metadata")
+        saved = next((e["payload"] for e in recorded
+                      if e["event"]=="run_configuration"), {})
+        saved_cfg = saved.get("config") or {}
+        saved_limits = saved.get("rate_limits") or saved_cfg.get("rate_limits") or {}
+        paper_path_text = (saved.get("paper_index_path") or
+                           metadata.get("paper_index_path"))
+        replay_paper_path = args.paper_index or (
+            Path(paper_path_text) if paper_path_text else None)
+        if replay_paper_path is not None and not replay_paper_path.is_file():
+            parser.error("Original paper index is unavailable: " +
+                         str(replay_paper_path))
         from council.replay import ReplayTransport, ResumeTransport
         from council.verify.source import PaperIndex
         mode = metadata.get("mode", "research")
@@ -231,11 +242,22 @@ def main(argv=None) -> int:
                         (".resumed" if args.resume else ".recomputed")) as destination:
             transport = ReplayTransport(recorded)
             if args.resume:
-                transport = ResumeTransport(recorded,
-                    FamilyTransport(timeout=args.timeout or 28.0,
-                                    strict_timeout=args.timeout is not None,
-                                    record=destination.record))
-            replay_deadline=args.deadline if args.deadline is not None else 300.0
+                live = FamilyTransport(
+                    timeout=args.timeout or saved.get("per_call_timeout") or
+                            metadata.get("per_call_timeout") or 28.0,
+                    strict_timeout=args.timeout is not None,
+                    record=destination.record)
+                for provider, settings in saved_limits.items():
+                    live.quota.configure_provider(provider,
+                        rate_per_minute=float(settings["requests_per_minute"]),
+                        burst=int(settings.get("burst",1)),
+                        daily_requests=settings.get("daily_requests"),
+                        daily_tokens=settings.get("daily_tokens"),
+                        tokens_per_minute=settings.get("tokens_per_minute"))
+                transport = ResumeTransport(recorded,live)
+            replay_deadline=(args.deadline if args.deadline is not None
+                else saved.get("deadline_seconds") or
+                     metadata.get("deadline_remaining") or 300.0)
             budget = RunBudget.start(replay_deadline,
                  reserve=min(20.0, replay_deadline / 3))
             if mode == "quick" and metadata.get("pipeline") == "evidence":
@@ -253,8 +275,8 @@ def main(argv=None) -> int:
                     translator_family=allocation.get("translator","glm"),
                     judge_family=allocation.get("judge","gemini"),
                     solver_strategies=metadata.get("solver_strategies", {}),
-                    paper_index=(PaperIndex(args.paper_index)
-                                 if args.paper_index else None))
+                    paper_index=(PaperIndex(replay_paper_path)
+                                 if replay_paper_path else None))
             elif mode == "full":
                 from council.full import FullCouncilRunner
                 from council.requirements import Requirements
@@ -269,11 +291,26 @@ def main(argv=None) -> int:
                     judge_family=allocation.get("judge","gemini"),
                     auditor_family=allocation.get("auditor","gemma"),
                     caps=metadata.get("debate_caps",{}),
+                    max_claims=saved_cfg.get("max_claims",metadata.get("max_claims",12)),
+                    hunter_cap=saved_cfg.get("hunter_cap",metadata.get("hunter_cap",4)),
+                    enable_coverage=(saved_cfg.get("optional",{}).get(
+                        "coverage_llm",metadata.get("enable_coverage",True))),
+                    enable_relevance=(saved_cfg.get("optional",{}).get(
+                        "relevance_check",metadata.get("enable_relevance",False))),
+                    critics=tuple(saved_cfg.get("optional",{}).get(
+                        "critics",metadata.get("critics",[]))),
+                    adaptive_seeds=(saved_cfg.get("optional",{}).get(
+                        "adaptive_seeds",metadata.get("adaptive_seeds",False))),
+                    enable_repairs=(saved_cfg.get("optional",{}).get(
+                        "repair_round",metadata.get("enable_repairs",True))),
                     solver_strategies=metadata.get("solver_strategies",{}),
-                    paper_index=(PaperIndex(args.paper_index)
-                                 if args.paper_index else None))
+                    paper_index=(PaperIndex(replay_paper_path)
+                                 if replay_paper_path else None))
             else:
-                runner=CouncilRunner(transport,destination,budget)
+                runner=CouncilRunner(transport,destination,budget,
+                    solvers=tuple(metadata.get("solver_families",DEFAULT_SOLVERS)),
+                    judge_family=metadata.get("judge_family",JUDGE),
+                    auditor_family=metadata.get("auditor_family",AUDITOR))
             result=asyncio.run(runner.run(question,mode=mode))
         print(json.dumps(result,ensure_ascii=False,indent=2))
         return 0
@@ -356,6 +393,13 @@ def main(argv=None) -> int:
             runner = CouncilRunner(transport, events, budget,
                 solvers=solvers, judge_family=cfg.judge if cfg else JUDGE,
                 auditor_family=cfg.auditor if cfg else AUDITOR)
+        from dataclasses import asdict
+        events.record("run_configuration",
+            config=asdict(cfg) if cfg is not None else None,
+            rate_limits=cfg.rate_limits if cfg else {},
+            deadline_seconds=args.deadline,
+            per_call_timeout=transport.timeout,
+            paper_index_path=str(args.paper_index) if args.paper_index else None)
         try:
             result = asyncio.run(runner.run(question, mode=args.mode))
         finally:
