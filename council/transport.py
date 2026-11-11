@@ -10,6 +10,7 @@ import hashlib
 import json
 import math
 import os
+import threading
 import time
 from pathlib import Path
 
@@ -47,6 +48,7 @@ class FamilyTransport:
         self.timeout = timeout
         self.strict_timeout=bool(strict_timeout)
         self.router = Router(timeout=timeout)
+        self._llm7_lock = threading.Lock()
         self.cache = HealthCache(health_file or Path(".router_health.json"))
         self.record = record or (lambda *a, **k: None)
         # Gentle unconfigured pacing (30 RPM/account) is a protective
@@ -168,11 +170,16 @@ class FamilyTransport:
                             prompt_hash=hashlib.sha256(message.encode()).hexdigest())
                 def infer():
                     if os.getenv("COUNCIL_HARD_DEADLINE", "0") == "1":
+                        if entry.provider == "LLM7.io":
+                            # Persist pacing between isolated child processes.
+                            with self._llm7_lock:
+                                self.router._pace_llm7()
                         from council.process_infer import generate as generate_process
                         return generate_process(
                             entry.provider, entry.model, user_text,
                             system_text=system_text, timeout=timeout,
-                            max_tokens=output_tokens, response_format=formatting)
+                            max_tokens=output_tokens, response_format=formatting,
+                            gemini_checked=tuple(self.router._gemini_checked))
                     captured = []
                     token = RAW_CAPTURE.set(captured)
                     try:
@@ -250,6 +257,8 @@ class FamilyTransport:
                 if not text.strip():
                     raise CandidateError("Empty response", kind="invalid_response")
                 elapsed = time.monotonic() - t0
+                if entry.provider == "Gemini":
+                    self.router._gemini_checked.add(entry.model)
                 self.cache.success(entry.provider, entry.model)
                 self.quota.success(entry.provider, entry.model)
                 usage = (raw.get('body',{}).get('usage',{})
