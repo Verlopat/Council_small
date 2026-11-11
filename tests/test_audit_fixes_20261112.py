@@ -107,7 +107,7 @@ class VerificationTests(unittest.TestCase):
             self.assertEqual(recompute_answer("print(4)", "3")[0], "fail")
         with patch("council.verify.author_check.run_python",
                    return_value=SandboxResult("ok", "sandbox completed",
-                                               "10000000001.1\\n")):
+                                               "10000000001.1\n")):
             self.assertEqual(recompute_answer("print(10000000001.1)",
                                               "10000000000.1")[0], "fail")
 
