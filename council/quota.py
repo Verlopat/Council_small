@@ -47,6 +47,7 @@ class QuotaScheduler:
     def __init__(self, *, default_rate: float = 1.0, default_burst: int = 1):
         self.default_rate, self.default_burst = default_rate, default_burst
         self.states: dict[tuple[str, str], EndpointState] = {}
+        self.provider_states: dict[str, EndpointState] = {}
         self.locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
         self.shared_day: dict[str, str] = {}
         self.shared_daily: dict[str, int] = {}
@@ -66,12 +67,29 @@ class QuotaScheduler:
         self.states[(provider, model)] = EndpointState(
             rate_per_minute, burst, daily_requests, daily_tokens,
             tokens_per_minute)
+        # The first configured account budget is shared across every endpoint.
+        # Repeated per-model configuration must NOT reset refill/usage.
+        self.provider_states.setdefault(provider, EndpointState(
+            rate_per_minute, burst))
+        if daily_requests is not None:
+            self.shared_daily[provider] = daily_requests
+        if daily_tokens is not None:
+            self.shared_daily_tokens[provider] = daily_tokens
         if tokens_per_minute is not None:
             if type(tokens_per_minute) is not int or tokens_per_minute <= 0:
                 raise ValueError("tokens_per_minute must be positive integer")
             self.shared_tpm_cap[provider]=tokens_per_minute
             self.shared_tpm_available.setdefault(provider,float(tokens_per_minute))
             self.shared_tpm_updated.setdefault(provider,time.monotonic())
+
+    def configure_provider(self, provider: str, *, rate_per_minute: float,
+                           burst: int = 1, daily_requests: int | None = None,
+                           daily_tokens: int | None = None,
+                           tokens_per_minute: int | None = None) -> None:
+        """Configure one account-wide bucket, not an independent bucket per model."""
+        self.configure(provider, "__provider_config__", rate_per_minute=rate_per_minute,
+                       burst=burst, daily_requests=daily_requests,
+                       daily_tokens=daily_tokens, tokens_per_minute=tokens_per_minute)
 
     def state(self, provider: str, model: str) -> EndpointState:
         return self.states.setdefault((provider, model), EndpointState(
@@ -126,6 +144,15 @@ class QuotaScheduler:
                 cooldown = max(0.0, state.cooldown_until - now)
                 wait_tokens = max(0.0, 1.0 - state.remaining) * 60 / state.rate_per_minute
                 wait = max(cooldown, wait_tokens)
+                account = self.provider_states.get(provider)
+                if account is not None:
+                    account.remaining = min(
+                        account.burst,
+                        account.remaining + max(0.0, now - account.refreshed_at)
+                        * account.rate_per_minute / 60.0)
+                    account.refreshed_at = now
+                    wait = max(wait, max(0.0, 1.0 - account.remaining)
+                               * 60.0 / account.rate_per_minute)
                 cap=self.shared_tpm_cap.get(provider)
                 if cap is not None:
                     if expected_tokens > cap:
@@ -140,6 +167,8 @@ class QuotaScheduler:
                     wait=max(wait,max(0.0,expected_tokens-tokens)*60.0/cap)
                 if wait <= 0:
                     state.remaining -= 1
+                    if account is not None:
+                        account.remaining -= 1
                     if cap is not None:
                         self.shared_tpm_available[provider]-=expected_tokens
                     state.requests_today += 1
@@ -164,6 +193,10 @@ class QuotaScheduler:
         if remaining is not None:
             try:
                 state.remaining = min(state.remaining, max(0, float(remaining)))
+                if provider in self.provider_states:
+                    account = self.provider_states[provider]
+                    account.remaining = min(account.remaining,
+                                            max(0, float(remaining)))
             except ValueError:
                 pass
         if input_tokens is not None and output_tokens is not None:
