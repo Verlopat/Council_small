@@ -349,17 +349,13 @@ async def execute(tasks,*,out_dir:Path,deadline:float,max_tasks:int,
             transport=FamilyTransport(record=events.record)
             if shared_quota is None:
                 shared_quota=transport.quota
-                from council.families import FAMILIES
                 for provider,settings in (rate_limits or {}).items():
-                    for family in FAMILIES.values():
-                        for endpoint in family.endpoints:
-                            if endpoint.provider==provider:
-                                shared_quota.configure(provider,endpoint.model,
-                                    rate_per_minute=float(settings["requests_per_minute"]),
-                                    burst=int(settings.get("burst",1)),
-                                    daily_requests=settings.get("daily_requests"),
-                                    daily_tokens=settings.get("daily_tokens"),
-                                    tokens_per_minute=settings.get("tokens_per_minute"))
+                    shared_quota.configure_provider(provider,
+                        rate_per_minute=float(settings["requests_per_minute"]),
+                        burst=int(settings.get("burst",1)),
+                        daily_requests=settings.get("daily_requests"),
+                        daily_tokens=settings.get("daily_tokens"),
+                        tokens_per_minute=settings.get("tokens_per_minute"))
             else:
                 # Do not reset RPM, TPM, or daily reservations between
                 # adjacent evaluation tasks and baselines.
