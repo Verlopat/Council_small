@@ -179,7 +179,7 @@ class FamilyTransport:
                             entry.provider, entry.model, user_text,
                             system_text=system_text, timeout=timeout,
                             max_tokens=output_tokens, response_format=formatting,
-                            gemini_checked=tuple(self.router._gemini_checked))
+                            gemini_checked=tuple(getattr(self.router,"_gemini_checked",())))
                     captured = []
                     token = RAW_CAPTURE.set(captured)
                     try:
