@@ -37,6 +37,10 @@ def evaluate_spec(spec: CheckSpecification, *, timeout: float = 10,
     initial = run_python(spec.code, timeout=timeout)
     if initial.outcome not in {"pass", "fail"}:
         return CheckOutcome(initial.outcome, spec.limitation, digest, None, initial.detail)
+    # A failing original check is a real failed property, not inconclusive.
+    if initial.outcome == "fail":
+        return CheckOutcome("fail", spec.limitation, digest, None,
+                            "original property check failed")
     # Explicit fixtures must themselves print a pass boolean.
     for positive in spec.valid_examples:
         result = run_python(positive, timeout=timeout)

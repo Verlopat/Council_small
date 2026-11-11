@@ -110,8 +110,8 @@ class CacheTests(unittest.TestCase):
         def limited(call):
             raise CandidateError("HTTP 429", kind="rate_limit", retry_after=120)
         candidates = [
-            mr.Candidate("LLM7.io", "first"),
-            mr.Candidate("LLM7.io", "second"),
+            mr.Candidate("LLM7.io", "first", quota_group="same"),
+            mr.Candidate("LLM7.io", "second", quota_group="same"),
             mr.Candidate("Groq", "ok"),
         ]
         router = FakeRouter({"first": limited, "second": limited})

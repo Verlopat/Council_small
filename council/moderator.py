@@ -58,7 +58,7 @@ class Moderator:
                 claim.status = ClaimStatus.WITHDRAWN
             else:
                 claim.status = ClaimStatus.UNRESOLVED
-            self.owner_last_refs[msg.thread] = set(msg.evidence)
+            self.owner_last_refs.setdefault(msg.thread, set()).update(msg.evidence)
         elif msg.act is Act.CHALLENGE and claim.status is ClaimStatus.PROPOSED:
             # Unverified critique does NOT establish the claim false.
             claim.status = ClaimStatus.UNRESOLVED

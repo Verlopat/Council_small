@@ -10,7 +10,7 @@ from council.models import ClaimStatus
 NUM=r"[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?:[eE][+-]?\d+)?"
 SCALAR=rf"(?:{NUM}|yes|no|true|false)"
 FINAL_INLINE=re.compile(
-    r"\bfinal\s+answer\s*[:=]\s*([^\r\n]+)",re.I)
+    r"\bfinal\s+answer\s*[:=]\s*(.*?)(?=\bfinal\s+answer\s*[:=]|$)",re.I|re.M)
 FINAL=re.compile(
     r"(?:the\s+)?(?:final\s+)?(?:answer|result)\s*(?::|is|=)\s*\**("+NUM+
     r")\**\s*[.!]?\s*$",re.I)

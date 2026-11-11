@@ -33,6 +33,12 @@ def load_config(path:Path)->CouncilConfig:
         raise RuntimeError("Install requirements.txt (PyYAML)") from exc
     data=yaml.safe_load(Path(path).read_text(encoding="utf-8"))
     if not isinstance(data,dict):raise ValueError("Configuration must be a map")
+    entries=data.get("solvers",[])
+    if (not isinstance(entries,list) or
+            any(isinstance(row,dict) and
+                (not isinstance(row.get("family"),str) or
+                 not row["family"].strip()) for row in entries)):
+        raise ValueError("Each solver entry must declare a nonempty family")
     cfg=CouncilConfig(
         mode=str(data.get("mode","full")),
         deadline_seconds=float(data.get("deadline_seconds",600)),

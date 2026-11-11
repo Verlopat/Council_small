@@ -65,6 +65,11 @@ class MessageBus:
             if thread.duplicates >= 2:
                 self.close(msg.thread, "dedupe_dropped")
             return "duplicate"
+        exchanges = sum(1 for old in thread.messages
+                        if old.sender_family == msg.sender_family and old.to == msg.to)
+        if exchanges >= self.pair_cap:
+            thread.close_cause = "cap_hit"
+            raise MessageCap("Pair exchange cap reached")
         if msg.act is Act.VERIFY_REQUEST:
             if thread.verifier_calls >= self.verifier_cap:
                 thread.close_cause = "cap_hit"
@@ -75,11 +80,6 @@ class MessageBus:
                 thread.close_cause = "cap_hit"
                 raise MessageCap("Repair cap reached")
             thread.repairs += 1
-        exchanges = sum(1 for old in thread.messages
-                        if old.sender_family == msg.sender_family and old.to == msg.to)
-        if exchanges >= self.pair_cap:
-            thread.close_cause = "cap_hit"
-            raise MessageCap("Pair exchange cap reached")
         thread.messages.append(msg)
         thread.fingerprints.add(fingerprint)
         return "accepted"
