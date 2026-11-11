@@ -12,16 +12,21 @@ def parse_object(text: str) -> dict[str, Any]:
     raw = text.strip()
     decoder = json.JSONDecoder()
     # A model may surround its JSON with fences/prose. Never eval expressions.
-    for pos, char in enumerate(raw):
-        if char != "{":
-            continue
-        try:
-            value, _ = decoder.raw_decode(raw[pos:])
-        except (ValueError, TypeError):
-            continue
-        if isinstance(value, dict):
-            return value
-    raise OutputError("No parseable JSON object")
+    # Decode ONLY the first outer object, never a nested object from a
+    # truncated reply. Invalid/truncated JSON must not produce default votes.
+    pos = raw.find("{")
+    if pos < 0:
+        raise OutputError("No JSON object in model output")
+    try:
+        value, end = decoder.raw_decode(raw[pos:])
+    except (ValueError, TypeError) as exc:
+        raise OutputError("Incomplete or invalid outer JSON object") from exc
+    if not isinstance(value, dict):
+        raise OutputError("The outer JSON value must be an object")
+    remainder = raw[pos + end:].strip()
+    if remainder.startswith(("{", "[")):
+        raise OutputError("Multiple JSON values in model output")
+    return value
 
 def require_string(obj: dict, name: str) -> str:
     value = obj.get(name)

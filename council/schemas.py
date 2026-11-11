@@ -5,7 +5,7 @@ from pydantic import (BaseModel, ConfigDict, Field, ValidationError,
                       field_validator, model_validator)
 
 class ModelSchema(BaseModel):
-    model_config=ConfigDict(extra="ignore",str_strip_whitespace=True)
+    model_config=ConfigDict(extra="forbid",str_strip_whitespace=True)
 
     @model_validator(mode="before")
     @classmethod
@@ -83,7 +83,7 @@ class ReviewObjection(ModelSchema):
     suggested_check:str=Field(min_length=1)
 
 class Review(ModelSchema):
-    objections:list[ReviewObjection]=Field(default_factory=list)
+    objections:list[ReviewObjection]
 
 class AuthorResponseSchema(ModelSchema):
     objection_id:str=Field(min_length=1)
@@ -118,7 +118,7 @@ class Translation(ModelSchema):
     artifact:dict=Field(default_factory=dict)
 
 class Hunter(ModelSchema):
-    found:bool=False
+    found:bool
     counterexample:str=""
     check_artifact:dict=Field(default_factory=dict)
     tried:list[str]=Field(default_factory=list)
@@ -174,7 +174,7 @@ class TopicPartialMatch(ModelSchema):
 class TopicJudge(ModelSchema):
     # The caller knows the topic; the model does not need to echo it.
     topic:str|None=None
-    versions:list[TopicVersion]=Field(default_factory=list)
+    versions:list[TopicVersion]
     best_version_id:str|None=None
     missing:list[str]=Field(default_factory=list)
     partial_matches:list[TopicPartialMatch]=Field(default_factory=list)
@@ -189,7 +189,7 @@ class ObjectionJudgment(ModelSchema):
 
 
 class ObjectionJudge(ModelSchema):
-    items:list[ObjectionJudgment]=Field(default_factory=list)
+    items:list[ObjectionJudgment]
 
 
 class Synthesis(ModelSchema):
@@ -203,14 +203,14 @@ class Synthesis(ModelSchema):
     completion_status:Literal["partial","unresolved"]="partial"
 
 class Audit(ModelSchema):
-    issues:list[str]=Field(default_factory=list)
+    issues:list[str]
     suggested_checks:list[str]=Field(default_factory=list)
 
 class Coverage(ModelSchema):
-    missing_requirements:list[str]=Field(default_factory=list)
+    missing_requirements:list[str]
 
 class Relevance(ModelSchema):
-    entails:bool=False
+    entails:bool
     limitations:list[str]=Field(default_factory=list)
     missing_assumptions:list[str]=Field(default_factory=list)
 

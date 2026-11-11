@@ -10,7 +10,7 @@ from council.models import ClaimStatus
 NUM=r"[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?:[eE][+-]?\d+)?"
 SCALAR=rf"(?:{NUM}|yes|no|true|false)"
 FINAL_INLINE=re.compile(
-    r"\bfinal\s+answer\s*[:=]\s*(?:\*\*)?\s*("+SCALAR+r")\b",re.I)
+    r"\bfinal\s+answer\s*[:=]\s*([^\r\n]+)",re.I)
 FINAL=re.compile(
     r"(?:the\s+)?(?:final\s+)?(?:answer|result)\s*(?::|is|=)\s*\**("+NUM+
     r")\**\s*[.!]?\s*$",re.I)
@@ -28,10 +28,29 @@ def normalize_answer(value:object)->str|None:
     item=value.strip().strip(chr(96)).strip().replace("**","")
     item=item.strip().strip('"').strip("'").strip()
     item=re.sub(r"(?i)^final\s+answer\s*[:=]\s*", "", item).strip()
-    if re.fullmatch(NUM,item):
+    item=item.rstrip("!?").strip()
+    if re.fullmatch(r"(?i)no\s+solutions?(?:\s+exists?)?\.?", item):
+        return "no solution"
+    if re.fullmatch(NUM, item):
         return item.replace(",","")
-    if re.fullmatch(r"(?i)(?:yes|no|true|false)",item):
-        return item.casefold()
+    if re.fullmatch(r"(?i)(?:yes|no|true|false)\.?",item):
+        return item.rstrip(".").casefold()
+    if re.fullmatch(rf"{NUM}\s*/\s*{NUM}", item):
+        from fractions import Fraction
+        try:
+            numerator, denominator = item.split("/", 1)
+            value = Fraction(numerator.replace(",", "")) / Fraction(
+                denominator.replace(",", ""))
+            return str(value.numerator) + "/" + str(value.denominator)
+        except (ZeroDivisionError, ValueError):
+            return None
+    # Only extract the LAST RHS of a complete, explicit arithmetic equation.
+    if "=" in item:
+        expression, scalar = item.rsplit("=", 1)
+        scalar = scalar.strip().rstrip(".").strip()
+        if (re.fullmatch(r"[0-9\s+\-*/().,%^eE]+", expression)
+                and re.fullmatch(NUM, scalar)):
+            return scalar.replace(",", "")
     return None
 
 
