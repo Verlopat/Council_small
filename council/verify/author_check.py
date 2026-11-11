@@ -72,7 +72,7 @@ def recompute_answer(code:str,claimed:str,*,timeout:float=8,
         # Preserve exact integer equality; tolerate only decimal round-off.
         a, b = Decimal(computed), Decimal(want)
         if a != a.to_integral_value() or b != b.to_integral_value():
-            tolerance = max(Decimal("1e-9"),
-                            Decimal("1e-9") * max(abs(a), abs(b)))
+            tolerance = max(Decimal("1e-12"),
+                            Decimal("2e-15") * max(abs(a), abs(b)))
             same = abs(a-b) <= tolerance
     return ("pass" if same else "fail"), ("printed="+computed[:90])
