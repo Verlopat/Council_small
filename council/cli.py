@@ -335,7 +335,7 @@ def main(argv=None) -> int:
                           "judge": cfg.judge if cfg else JUDGE,
                           "auditor": (cfg.auditor if cfg else "gemma")
                             if args.mode == "full" else
-                            (AUDITOR if args.mode == "research" else None),
+                            ((cfg.auditor if cfg else AUDITOR) if args.mode == "research" else None),
                           "deadline": args.deadline, "api_calls": 0}, indent=2))
         return 0
     paper_index=None
