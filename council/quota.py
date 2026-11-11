@@ -67,14 +67,6 @@ class QuotaScheduler:
         self.states[(provider, model)] = EndpointState(
             rate_per_minute, burst, daily_requests, daily_tokens,
             tokens_per_minute)
-        # The first configured account budget is shared across every endpoint.
-        # Repeated per-model configuration must NOT reset refill/usage.
-        self.provider_states.setdefault(provider, EndpointState(
-            rate_per_minute, burst))
-        if daily_requests is not None:
-            self.shared_daily[provider] = daily_requests
-        if daily_tokens is not None:
-            self.shared_daily_tokens[provider] = daily_tokens
         if tokens_per_minute is not None:
             if type(tokens_per_minute) is not int or tokens_per_minute <= 0:
                 raise ValueError("tokens_per_minute must be positive integer")
@@ -87,13 +79,31 @@ class QuotaScheduler:
                            daily_tokens: int | None = None,
                            tokens_per_minute: int | None = None) -> None:
         """Configure one account-wide bucket, not an independent bucket per model."""
-        self.configure(provider, "__provider_config__", rate_per_minute=rate_per_minute,
-                       burst=burst, daily_requests=daily_requests,
-                       daily_tokens=daily_tokens, tokens_per_minute=tokens_per_minute)
+        if provider not in self.provider_states:
+            self.provider_states[provider] = EndpointState(rate_per_minute, burst)
+        if daily_requests is not None:
+            if type(daily_requests) is not int or daily_requests <= 0:
+                raise ValueError("daily_requests must be a positive integer")
+            self.shared_daily[provider] = daily_requests
+        if daily_tokens is not None:
+            if type(daily_tokens) is not int or daily_tokens <= 0:
+                raise ValueError("daily_tokens must be a positive integer")
+            self.shared_daily_tokens[provider] = daily_tokens
+        if tokens_per_minute is not None:
+            if type(tokens_per_minute) is not int or tokens_per_minute <= 0:
+                raise ValueError("tokens_per_minute must be a positive integer")
+            self.shared_tpm_cap[provider] = tokens_per_minute
+            self.shared_tpm_available.setdefault(provider, float(tokens_per_minute))
+            self.shared_tpm_updated.setdefault(provider, time.monotonic())
 
     def state(self, provider: str, model: str) -> EndpointState:
-        return self.states.setdefault((provider, model), EndpointState(
-            self.default_rate, self.default_burst))
+        account = self.provider_states.get(provider)
+        # Provider-scoped YAML limits must not be silently tightened by an
+        # unrelated per-model default pacing floor. Explicit per-model
+        # configure() calls still retain their own endpoint-specific limits.
+        rate = max(self.default_rate, account.rate_per_minute) if account else self.default_rate
+        burst = max(self.default_burst, account.burst) if account else self.default_burst
+        return self.states.setdefault((provider, model), EndpointState(rate, burst))
 
     async def acquire(self, provider: str, model: str, *, deadline: float,
                       expected_tokens: int = 0) -> None:
