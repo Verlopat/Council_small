@@ -5,12 +5,15 @@ against every configured endpoint, compare aggregate scores and inspect drift.
 """
 from __future__ import annotations
 import argparse
+import asyncio
 import json
 from pathlib import Path
 import time
 import os
 from council.families import FAMILIES
 from council.transport import FamilyTransport
+from council.quota import QuotaScheduler
+from router_errors import CandidateError
 from model_router import Candidate, Router
 from eval.regression_probe import make,compare,Probe
 from answer_validation import matches_expected
@@ -28,7 +31,7 @@ def candidates():
                 seen.add(key)
                 yield family.name,endpoint
 
-def inspect(*,max_requests:int):
+def inspect(*,max_requests:int,rate_limits:dict|None=None,failures:list|None=None):
     """Interleave endpoints fairly; stop at the exact opt-in request budget.
 
     With a cap smaller than 20 times the eligible endpoint count, regression
@@ -37,6 +40,14 @@ def inspect(*,max_requests:int):
     if not 1 <= max_requests <= 1000:
         raise ValueError("Unsafe request bound")
     router = Router(timeout=30)
+    quota = QuotaScheduler(default_rate=30.0, default_burst=1)
+    for provider,settings in (rate_limits or {}).items():
+        quota.configure_provider(provider,
+            rate_per_minute=float(settings["requests_per_minute"]),
+            burst=int(settings.get("burst",1)),
+            daily_requests=settings.get("daily_requests"),
+            daily_tokens=settings.get("daily_tokens"),
+            tokens_per_minute=settings.get("tokens_per_minute"))
     rows = []
     selected = []
     for family, endpoint in candidates():
@@ -58,12 +69,23 @@ def inspect(*,max_requests:int):
                 return rows
             attempts += 1
             try:
+                asyncio.run(quota.acquire(endpoint.provider, endpoint.model,
+                    deadline=time.monotonic()+90,
+                    expected_tokens=max(1,len(question)//3)+512))
                 actual = router.generate(selected_model, question, max_output_tokens=512)
-                score = 1.0 if matches_expected(actual, expected) else 0.0
-            except Exception:
-                actual = ""
-                score = 0.0
-            rows.append(make(family, endpoint.model, task_id, actual, score))
+            except Exception as exc:
+                kind=getattr(exc,"kind","quota_contention"
+                             if isinstance(exc,TimeoutError) else "provider_error")
+                quota.failure(endpoint.provider,endpoint.model,kind=kind,
+                              retry_after=getattr(exc,"retry_after",None))
+                if failures is not None:
+                    failures.append({"provider":endpoint.provider,
+                        "model":endpoint.model,"task":task_id,"kind":kind})
+                # Provider errors are missing observations, not incorrect answers.
+                continue
+            quota.success(endpoint.provider,endpoint.model)
+            rows.append(make(family, endpoint.model, task_id, actual,
+                1.0 if matches_expected(actual, expected) else 0.0))
     return rows
 
 
@@ -98,7 +120,12 @@ def main(argv=None):
                           "configured_max_requests":args.max_requests,
                           "warning":"Check each free/non-billed account before opt-in."},indent=2))
         return
-    rows=inspect(max_requests=args.max_requests)
+    from council.config import load_config
+    cfg=load_config(Path("council.yaml")) if Path("council.yaml").is_file() else None
+    failures=[]
+    rows=inspect(max_requests=args.max_requests,
+                 rate_limits=cfg.rate_limits if cfg else None,
+                 failures=failures)
     args.out.parent.mkdir(parents=True,exist_ok=True)
     with args.out.open("w",encoding="utf-8") as stream:
         for row in rows:
@@ -109,6 +136,8 @@ def main(argv=None):
         warnings=compare(old,rows)
     print(json.dumps({"saved":str(args.out),"scored_probes":len(rows),
                       "coverage":coverage(rows),
+                      "provider_error_count":len(failures),
+                      "provider_errors":failures[:100],
                       "performance_warnings":warnings},indent=2))
 
 if __name__=="__main__":main()
