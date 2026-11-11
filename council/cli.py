@@ -140,7 +140,7 @@ def print_compact_result(result: dict, run_id: str, run_dir: Path) -> None:
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="Evidence-aware multi-model research council")
     parser.add_argument("question", nargs="*", help="A research question")
-    parser.add_argument("--mode", choices=("quick", "research", "full"), default="research")
+    parser.add_argument("--mode", choices=("quick", "research", "full"), default=None)
     parser.add_argument("--deadline", type=float, default=None,
                         help="Total seconds, including synthesis and audit")
     parser.add_argument("--timeout", type=float, default=None,
@@ -167,6 +167,15 @@ def main(argv=None) -> int:
     parser.add_argument("--verbose", action="store_true",
                         help="Print full reviewer, claim, source and obligation diagnostics")
     args = parser.parse_args(argv)
+    cfg = None
+    if (not (args.list_families or args.replay or args.recompute or args.resume)
+            and args.config.is_file()):
+        from council.config import load_config
+        cfg = load_config(args.config)
+    args.mode = args.mode or (cfg.mode if cfg else "research")
+    if ((args.deadline is not None and args.deadline <= 0) or
+            (args.timeout is not None and args.timeout <= 1)):
+        parser.error("Deadline and timeout must be positive")
     if args.paper_index is not None and not args.paper_index.is_file():
         parser.error("--paper-index must identify an existing SQLite corpus")
     if args.list_families:
@@ -271,21 +280,14 @@ def main(argv=None) -> int:
     question = " ".join(args.question).strip()
     if not question:
         parser.error("Provide a research question, --list-families or --replay")
-    if ((args.deadline is not None and args.deadline <= 0) or
-            (args.timeout is not None and args.timeout <= 1)):
-        parser.error("Deadline and timeout must be positive")
-
-    cfg = None
     if args.mode in ("quick", "full"):
         from council.full import FULL_SOLVERS
-        from council.config import load_config
-        cfg = load_config(args.config) if args.config.is_file() else None
         configured = cfg.solvers if cfg else FULL_SOLVERS
         if args.mode == "quick" and not configured:
             parser.error("Quick mode requires at least one solver family")
         solvers = configured[:1] if args.mode == "quick" else configured
     else:
-        solvers = DEFAULT_SOLVERS
+        solvers = cfg.solvers if cfg else DEFAULT_SOLVERS
     if args.deadline is None:
         args.deadline=(cfg.deadline_seconds if cfg is not None else 300.0)
     if args.dry_run:
@@ -313,15 +315,12 @@ def main(argv=None) -> int:
             record=events.record)
         if cfg:
             for provider, settings in cfg.rate_limits.items():
-                for family in FAMILIES.values():
-                    for endpoint in family.endpoints:
-                        if endpoint.provider == provider:
-                            transport.quota.configure(provider,endpoint.model,
-                                rate_per_minute=float(settings["requests_per_minute"]),
-                                burst=int(settings.get("burst",1)),
-                                daily_requests=settings.get("daily_requests"),
-                                daily_tokens=settings.get("daily_tokens"),
-                                tokens_per_minute=settings.get("tokens_per_minute"))
+                transport.quota.configure_provider(provider,
+                    rate_per_minute=float(settings["requests_per_minute"]),
+                    burst=int(settings.get("burst",1)),
+                    daily_requests=settings.get("daily_requests"),
+                    daily_tokens=settings.get("daily_tokens"),
+                    tokens_per_minute=settings.get("tokens_per_minute"))
         if args.mode == "full":
             from council.full import FullCouncilRunner
             from council.requirements import Requirements
@@ -354,7 +353,9 @@ def main(argv=None) -> int:
                 solver_strategies=(cfg.solver_strategies if cfg else None),
                 paper_index=paper_index)
         else:
-            runner = CouncilRunner(transport, events, budget)
+            runner = CouncilRunner(transport, events, budget,
+                solvers=solvers, judge_family=cfg.judge if cfg else JUDGE,
+                auditor_family=cfg.auditor if cfg else AUDITOR)
         try:
             result = asyncio.run(runner.run(question, mode=args.mode))
         finally:
