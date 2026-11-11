@@ -335,9 +335,11 @@ class Router:
             if not model.startswith('@cf/'):
                 raise CandidateError('Cloudflare model must use a @cf/ ID')
             result = api_call('POST', f'https://api.cloudflare.com/client/v4/accounts/{account}/ai/run/{model}',
-                              key=key, payload={'messages': messages},
+                              key=key, payload={'messages': messages, 'max_tokens': token_limit},
                               timeout=timeout)
             data = result.get('result') or {}
+            if isinstance(data, dict) and str(data.get('finish_reason') or '').lower() in {'length', 'max_tokens'}:
+                raise CandidateError('Cloudflare generation incomplete', kind='output_truncated')
             if isinstance(data, dict):
                 raw = data.get('response') or data.get('text') or ''
                 if not raw and data.get('choices'):
@@ -347,7 +349,7 @@ class Router:
         elif provider == 'Ollama Cloud':
             result = api_call('POST', 'https://ollama.com/api/chat', key=key,
                               payload={'model': model, 'messages': messages,
-                                       'stream': False}, timeout=timeout)
+                                       'stream': False, 'options': {'num_predict': token_limit}}, timeout=timeout)
             if result.get('done_reason') in ('length', 'unload'):
                 raise CandidateError('Ollama generation incomplete',
                                      kind='output_truncated')

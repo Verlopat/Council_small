@@ -3,10 +3,24 @@
 This is NOT a semantic or factual correctness judge.
 """
 from decimal import Decimal, InvalidOperation
+from fractions import Fraction
 import re
 from council.final_answers import extract_final_answer
 
-NUMBER = r'[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?'
+NUMBER = r'[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?:[eE][+-]?\d+)?'
+
+
+def _number(value: str):
+    """Exact decimal and fraction comparison without float rounding."""
+    try:
+        pieces = value.replace(",", "").split("/")
+        if len(pieces) == 1:
+            return Fraction(Decimal(pieces[0]))
+        if len(pieces) == 2:
+            return Fraction(Decimal(pieces[0])) / Fraction(Decimal(pieces[1]))
+    except (InvalidOperation, ZeroDivisionError, ValueError):
+        pass
+    return None
 
 
 def matches_expected(response: str, expected: str) -> bool:
@@ -40,13 +54,13 @@ def matches_expected(response: str, expected: str) -> bool:
             r"(yes|no|true|false)[.!]?",last)
         aliases={"true":"yes","yes":"yes","false":"no","no":"no"}
         return bool(found and aliases[found.group(1).lower()]==aliases[wanted.lower()])
-    if not re.fullmatch(NUMBER, wanted):
+    if wanted.casefold() in {"no solution", "no solution exists", "no solutions"}:
+        return scalar == "no solution"
+    if not (re.fullmatch(NUMBER, wanted) or
+            re.fullmatch(rf"{NUMBER}\s*/\s*{NUMBER}", wanted)):
         return False
     if scalar is not None:
-        try:
-            return Decimal(scalar.replace(",","")) == Decimal(wanted.replace(",",""))
-        except InvalidOperation:
-            return False
+        return _number(scalar) is not None and _number(scalar) == _number(wanted)
     if not actual:
         return False
 
@@ -72,7 +86,4 @@ def matches_expected(response: str, expected: str) -> bool:
 
     if number is None:
         return False
-    try:
-        return Decimal(number.replace(',', '')) == Decimal(wanted.replace(',', ''))
-    except InvalidOperation:
-        return False
+    return _number(number) is not None and _number(number) == _number(wanted)

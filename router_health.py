@@ -141,7 +141,8 @@ class HealthCache:
         if kind in {"auth", "billing_required"}:
             # Provider-wide cooldown: never retry an account that needs billing.
             self.data["providers"][provider] = entry
-        elif kind == "rate_limit":
+        elif kind == "rate_limit" and quota_group is not None:
+            # Model-specific 429s must not hide healthy fallback endpoints.
             self.data["groups"][self.quota_key(provider, quota_group)] = entry
         else:
             key = self.model_key(provider, model)

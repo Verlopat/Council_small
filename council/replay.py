@@ -48,6 +48,8 @@ class ReplayTransport:
 class ResumeTransport(ReplayTransport):
     def __init__(self,events,live):
         super().__init__(events)
+        # Live resume retries old unavailable roles instead of replaying failure.
+        self.unavailable.clear()
         self.live=live
 
     async def complete(self,family,message,budget,*,role,synthesis=False):

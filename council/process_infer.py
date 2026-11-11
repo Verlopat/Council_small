@@ -27,7 +27,11 @@ def _provider_worker(connection, provider: str, model: str, prompt: str,
         finally:
             RAW_CAPTURE.reset(token)
     except CandidateError as error:
-        output = {"ok":False,"kind":error.kind}
+        import re
+        match = re.match(r"HTTP ([0-9]{3}):", str(error))
+        output = {"ok": False, "kind": error.kind,
+                  "retry_after": error.retry_after,
+                  "http_status": int(match.group(1)) if match else None}
     except Exception:
         # Never echo exception/URL/credentials across the process boundary.
         output = {"ok":False,"kind":"provider_worker_error"}
@@ -59,8 +63,11 @@ def generate(provider: str, model: str, prompt: str, *,
         except EOFError:
             raise CandidateError("Inference worker exited",kind="server") from None
         if not payload.get("ok"):
-            raise CandidateError("Inference worker failed",
-                                 kind=payload.get("kind","server"))
+            status = payload.get("http_status")
+            label = "HTTP " + str(status) + ": " if status is not None else ""
+            raise CandidateError(label + "Inference worker failed",
+                                 kind=payload.get("kind","server"),
+                                 retry_after=payload.get("retry_after"))
         return payload["answer"], payload.get("raw")
     finally:
         receiving.close()
