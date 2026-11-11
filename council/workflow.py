@@ -31,6 +31,8 @@ class CouncilRunner:
         self.events = events
         self.budget = budget
         self.solvers = solvers
+        self.judge_family = judge_family
+        self.auditor_family = auditor_family
         self.ledger = ClaimLedger()
         self.warnings: list[str] = []
         self.actual_models: list[dict] = []
@@ -153,12 +155,14 @@ class CouncilRunner:
         return None
 
     def _proposal(self, family: str, body: dict, index: int) -> dict:
+        """Validate the entire proposal before admitting any claim to the ledger."""
         approach = require_string(body, "approach")
         raw_claims = item_list(body, "claims")
         if not raw_claims:
             raise OutputError("Proposal must include at least one claim")
         proposal_id = "p" + str(index)
         claim_map: dict[str, str] = {}
+        pending: list[Claim] = []
         for j, raw in enumerate(raw_claims, 1):
             local = require_string(raw, "id")
             statement = require_string(raw, "statement")
@@ -166,18 +170,26 @@ class CouncilRunner:
                 raise OutputError("Duplicate local claim id")
             cid = proposal_id + ":c" + str(j)
             claim_map[local] = cid
-            self.ledger.add_claim(Claim(
+            pending.append(Claim(
                 id=cid, version=1, statement=statement, owner_family=family,
                 limitations=string_list(raw, "limitations")))
-        final_answer=body.get("final_answer") or ""
-        if not isinstance(final_answer,str):
+        final_answer = body.get("final_answer") or ""
+        if not isinstance(final_answer, str):
             raise OutputError("final_answer must be a string")
+        hypotheses = string_list(body, "hypotheses")
+        experiments = string_list(body, "experiments")
+        artifact = body.get("artifact")
+        if artifact is not None and not isinstance(artifact, dict):
+            raise OutputError("artifact must be an object")
+        if any(claim.id in self.ledger.claims for claim in pending):
+            raise OutputError("Proposal claim ID already registered")
+        for claim in pending:
+            self.ledger.add_claim(claim)
         return {"id": proposal_id, "family": family, "approach": approach,
-                "final_answer":final_answer.strip(),
+                "final_answer": final_answer.strip(),
                 "claim_ids": list(claim_map.values()), "claim_map": claim_map,
-                "hypotheses": string_list(body, "hypotheses"),
-                "experiments": string_list(body, "experiments"),
-                "artifact":body.get("artifact") if isinstance(body.get("artifact"),dict) else {}}
+                "hypotheses": hypotheses, "experiments": experiments,
+                "artifact": artifact or {}}
 
     async def run(self, question: str, *, mode: str = "research") -> dict:
         if mode not in {"quick", "research"}:
@@ -186,8 +198,8 @@ class CouncilRunner:
             raise ValueError("The research question must not be empty")
         active = self.solvers[:1] if mode == "quick" else self.solvers
         self.events.record("run_started", question=question, mode=mode,
-                           solver_families=list(active), judge_family=JUDGE,
-                           auditor_family=AUDITOR)
+                           solver_families=list(active), judge_family=self.judge_family,
+                           auditor_family=self.auditor_family)
         proposals: list[dict] = []
         objections: list[Objection] = []
         replies: list[AuthorResponse] = []
@@ -245,7 +257,9 @@ class CouncilRunner:
                 if body is None:
                     continue
                 try:
-                    p["revised_approach"] = require_string(body, "revised_approach")
+                    revised = body.get("revised_approach")
+                    if isinstance(revised, str) and revised.strip():
+                        p["revised_approach"] = revised.strip()
                     for raw in item_list(body, "revised_claims"):
                         cid = require_string(raw, "claim_id")
                         if cid not in p["claim_ids"]:
@@ -278,7 +292,7 @@ class CouncilRunner:
         brief.limitations = list(self.warnings)
 
         if proposals:
-            synthesis = await self._call(JUDGE, "synthesis", {
+            synthesis = await self._call(self.judge_family, "synthesis", {
                 "question": question, "proposals": proposals,
                 "claims": [asdict(c) for c in self.ledger.claims.values()],
                 "objections": [asdict(o) for o in objections],
@@ -304,7 +318,7 @@ class CouncilRunner:
                         brief.proposed_experiments +
                         string_list(synthesis, "proposed_experiments")))
                     brief.next_actions = string_list(synthesis, "next_actions")
-                    self.events.record("synthesis_received", family=JUDGE)
+                    self.events.record("synthesis_received", family=self.judge_family)
                 except OutputError:
                     brief.limitations.append("Synthesis schema invalid; deterministic partial preserved")
             else:
@@ -312,8 +326,8 @@ class CouncilRunner:
         else:
             brief.limitations.append("No validated independent proposal obtained")
 
-        if mode == "research" and proposals:
-            audit = await self._call(AUDITOR, "audit", {
+        if mode == "research" and proposals and self.auditor_family is not None:
+            audit = await self._call(self.auditor_family, "audit", {
                 "question": question, "brief": brief.to_dict(),
                 "claims": [asdict(c) for c in self.ledger.claims.values()],
                 "objections": [asdict(o) for o in objections],
@@ -322,7 +336,7 @@ class CouncilRunner:
                 try:
                     brief.unresolved_objections.extend(string_list(audit, "issues"))
                     brief.proposed_experiments.extend(string_list(audit, "suggested_checks"))
-                    self.events.record("audit_received", family=AUDITOR)
+                    self.events.record("audit_received", family=self.auditor_family)
                 except OutputError:
                     brief.limitations.append("Audit schema invalid")
             else:
