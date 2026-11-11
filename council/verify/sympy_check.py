@@ -12,5 +12,7 @@ def identity(left: str, right: str, *, timeout: float = 15):
         "left, right = json.loads(" + repr(json.dumps([left, right])) + ")\n"
         "allowed = {'x':x, 'y':y, 'z':z, 'n':n}\n"
         "a,b = sympify(left, locals=allowed), sympify(right, locals=allowed)\n"
-        "print(json.dumps({'pass': bool(simplify(a-b)==0)}))\n")
+        "difference=simplify(a-b)\n"
+         "unknown=(difference!=0 and bool(difference.free_symbols))\n"
+         "print(json.dumps({'pass': difference==0, 'inconclusive': unknown}))\n")
     return run_python(script, timeout=timeout)
