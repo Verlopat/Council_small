@@ -105,6 +105,11 @@ class VerificationTests(unittest.TestCase):
         with patch("council.verify.author_check.run_python",
                    return_value=SandboxResult("ok", "sandbox completed", "4\n")):
             self.assertEqual(recompute_answer("print(4)", "3")[0], "fail")
+        with patch("council.verify.author_check.run_python",
+                   return_value=SandboxResult("ok", "sandbox completed",
+                                               "10000000001.1\\n")):
+            self.assertEqual(recompute_answer("print(10000000001.1)",
+                                              "10000000000.1")[0], "fail")
 
     def test_quoted_line_wrap_and_soft_hyphen(self):
         with tempfile.TemporaryDirectory() as directory:
