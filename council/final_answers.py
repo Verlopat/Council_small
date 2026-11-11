@@ -108,6 +108,9 @@ def proposal_answers(proposals:list[dict],ledger)->tuple[str|None,dict[str,str|N
         candidates[proposal["id"]]=candidate
         if verified is not None or candidate is None:
             continue
+        if select_candidate_answer({proposal["id"]:candidate},
+                ledger.claims.values(),ledger.evidence.values(),[proposal])["answer"] is None:
+            continue
         if proposal.get("answer_claim_id"):
             # Scoped answer check can pass even with unverified explanatory
             # siblings, but never with a contradicted sibling.
@@ -122,3 +125,55 @@ def proposal_answers(proposals:list[dict],ledger)->tuple[str|None,dict[str,str|N
                         for cid in ids)):
             verified=candidate
     return verified,candidates
+
+
+def select_candidate_answer(candidates:dict, claims, evidence, proposals=()):
+    """Select without hidden gold; scoped passes are preferences, not proof.
+
+    Raw candidates remain available for diagnostics/oracle upper bounds.
+    Current contradictions and author inconsistencies must never win fallback.
+    """
+    from dataclasses import asdict, is_dataclass
+    def record(item):
+        return asdict(item) if is_dataclass(item) else item
+    claim_rows=[record(c) for c in claims]
+    evidence_rows=[record(e) for e in evidence]
+    owners={p['id']:p for p in proposals}
+    eligible=[]
+    excluded={}
+    for pid, candidate in candidates.items():
+        if candidate is None:
+            continue
+        proposal=owners.get(pid,{})
+        owned=[c for c in claim_rows if c['id'].startswith(pid+':')]
+        if proposal.get('author_inconsistency'):
+            excluded[pid]='author_answer_inconsistent'
+            continue
+        if any(c.get('status') in {ClaimStatus.CONTRADICTED,ClaimStatus.WITHDRAWN}
+               for c in owned):
+            excluded[pid]='contradicted_or_withdrawn_claim'
+            continue
+        answer=next((c for c in owned if c['id']==pid+':answer'),None)
+        checks=[e for e in evidence_rows if answer is not None
+                and e.get('claim_id')==answer['id']
+                and e.get('claim_version')==answer['version']
+                and e.get('kind') in {'test','formal_proof'}
+                and not str(e.get('checker_kind') or '').startswith('author_')]
+        if any(e.get('outcome')=='fail' and e.get('independently_checked')
+               for e in checks):
+            excluded[pid]='independently_failed_answer_check'
+            continue
+        # An unaligned pass can guide an explicitly unverified choice, but
+        # never overrides a failure or upgrades the answer to verified.
+        rank=(-1 if any(e.get('outcome')=='fail' for e in checks) else
+              1 if any(e.get('outcome')=='pass' for e in checks) else 0)
+        eligible.append((rank,pid,candidate))
+    if not eligible:
+        return {'answer':None,'proposal_id':None,'basis':'no_eligible_candidate',
+                'excluded':excluded}
+    rank,pid,answer=max(eligible,key=lambda item:item[0])
+    return {'answer':answer,'proposal_id':pid,
+            'basis':('scoped_answer_check_pass_unverified' if rank>0 else
+                     'unaligned_answer_check_failed_unverified' if rank<0 else
+                     'first_eligible_unverified_candidate'),
+            'excluded':excluded}

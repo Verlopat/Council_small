@@ -128,8 +128,9 @@ python -m eval.run_eval runs/phase_a_scalar_smoke_nov10 \
   --baseline self_consistency
 ```
 
-`--skip-vote6` suppresses the six additional family-vote API calls while
-retaining the single-model and self-consistency baselines. The full two-repeat
+`eval.execute` leaves six-family voting off by default while retaining the
+single-model and self-consistency baselines. Opt in with `--vote6`; the older
+`--skip-vote6` flag remains accepted for existing commands. The full two-repeat
 quick/full script uses `--no-baselines` to avoid all extra baseline calls.
 
 An arithmetic answer may be independently verified only when the exact
@@ -154,6 +155,28 @@ Older run databases may include scheduled retries that never dispatched; rerun
 evaluations to use the corrected accounting. Equal call counts still do not mean
 equal tokens or provider charges. These changes have offline regression coverage;
 provider-account behavior and sandbox isolation require local validation.
+
+## Smoke-test selection and code voting (November 11)
+
+Phase-A selection now records `answer_selection` with the chosen proposal,
+basis and excluded proposal IDs. Raw `candidate_answers` remain available for
+diagnostics and the candidate-oracle upper bound. A contradicted or withdrawn
+proposal, an author-inconsistent answer, or an independently failed answer check
+cannot win fallback selection. A current translator pass on the answer claim
+is preferred over an unchecked candidate; this preference does **not** make an
+unaligned check independently verified. Side-claim passes do not rank an answer.
+Answer claims already precede side claims in the translation queue.
+
+For code self-consistency, samples vote on the execution result for an explicit
+public `xs=[...]` input in the question. Execution remains sandbox-only. A strict
+majority selects the first program in the winning result group; unavailable or
+failed executions remain in the denominator. Hidden tests grade the selected
+program afterward and never influence selection. Matching on one public input
+is not proof that two programs implement the same function.
+
+Zero false verifications when no answers were verified is a zero-certification
+observation, not evidence of general verification reliability. Word-problem and
+symbolic answer checks still require independent claim-to-check alignment.
 
 ## Safety and limitations
 

@@ -19,8 +19,8 @@ from eval.tasks import load
 from eval.baselines import majority,best_of_n,family_vote
 from council.verify.arithmetic import check
 from answer_validation import matches_expected
-from council.final_answers import extract_final_answer
-from eval.code_tasks import extract_function_source,hidden_case_outcome
+from council.final_answers import extract_final_answer, select_candidate_answer
+from eval.code_tasks import extract_function_source,hidden_case_outcome,public_case_output
 
 def canonical_vote_answer(text: str) -> str:
     """Normalize only a terminal answer, not the semantic correctness.
@@ -106,11 +106,14 @@ async def run_task(task,transport,events,*,deadline,baseline_samples=0,
     # otherwise the first original solver's extracted final answer.
     # "Any candidate correct" is an ORACLE UPPER BOUND, never the
     # deployed predictor or an improvement claim.
-    selected=(final if final is not None else next(
-        (v for v in candidates.values() if v is not None),None))
+    selection=council.get("answer_selection") or select_candidate_answer(
+        candidates,council.get("claims",[]),council.get("evidence",[]),
+        council.get("proposals",[]))
+    selected=final if final is not None else selection["answer"]
     output={"task_id":task["id"],"kind":task.get("kind"),
             "mode":mode,"system":"council","answer":selected,
             "candidate_answers":candidates,"verified_answer":final,
+            "answer_selection":selection,
             "calls":model_calls,"equal_budget":True,"latency":time.monotonic()-initial,
             "unresolved":council.get("verdict",{}).get("status")!="answer",
             "composition_unchecked":council.get("composition",{}).get("outcome")=="unchecked"}
@@ -139,6 +142,8 @@ async def run_task(task,transport,events,*,deadline,baseline_samples=0,
         sources=[]
         for proposal in council.get("proposals",[]) or []:
             if not isinstance(proposal,dict):
+                continue
+            if (candidates and proposal.get("id")!=selection.get("proposal_id")):
                 continue
             artifact=proposal.get("artifact") or {}
             if isinstance(artifact,dict):
@@ -196,11 +201,30 @@ async def run_task(task,transport,events,*,deadline,baseline_samples=0,
                       for answer in baseline_outputs]
                      if task.get("kind") in {"numeric","symbolic"}
                      else baseline_outputs)
-        vote=majority(vote_inputs)
+        public_outputs=None
+        if task.get("kind")=="code":
+            public_outputs=[await asyncio.to_thread(public_case_output,a,q)
+                            for a in baseline_outputs]
+            # Keep failed samples in the denominator. Never form a majority
+            # by silently dropping unavailable/invalid implementations.
+            from collections import Counter
+            counts=Counter(v for v in public_outputs if v is not None)
+            winner=next((v for v,n in counts.items()
+                         if 2*n>len(baseline_outputs)),None)
+            from eval.baselines import Baseline
+            code=(baseline_outputs[public_outputs.index(winner)]
+                  if winner is not None else None)
+            vote=Baseline("self_consistency",code,tuple(baseline_outputs),
+                          len(baseline_outputs),"public input execution vote")
+        else:
+            vote=majority(vote_inputs)
         base={"task_id":task["id"],"system":"self_consistency",
               "answer":vote.answer,"calls":baseline_calls,
               "equal_budget":baseline_calls==model_calls,
               "unresolved":vote.answer is None}
+        if public_outputs is not None:
+            base["public_execution_outputs"]=public_outputs
+            base["selection_basis"]="public_input_execution_majority"
         if "expected" in task:
             base["correct"]=int(matches_expected(str(vote.answer or ""),
                                                  str(task["expected"])))
@@ -367,6 +391,8 @@ def main(argv=None):
     parser.add_argument("--deadline",type=float,default=240)
     parser.add_argument("--no-baselines",action="store_true",
                         help="Run only Council, without self-consistency or six-family API calls")
+    parser.add_argument("--vote6",action="store_true",
+                        help="Opt in to six-family voting and its additional provider calls")
     parser.add_argument("--skip-vote6",action="store_true",
                         help="Keep single-model and self-consistency baselines without six-family API calls")
     parser.add_argument("--baseline-samples",type=int,default=0,
@@ -375,6 +401,9 @@ def main(argv=None):
                         default=Path("runs")/"eval")
     parser.add_argument("--confirm-free",action="store_true")
     args=parser.parse_args(argv)
+    if args.vote6 and args.skip_vote6:
+        parser.error("--vote6 and --skip-vote6 are mutually exclusive")
+    skip_vote6=not args.vote6
     if not 1<=args.max_tasks<=100 or not 0<=args.baseline_samples<=55:
         parser.error("Unsafe task or sample count")
     selected_tasks=args.tasks_option or args.tasks
@@ -385,7 +414,7 @@ def main(argv=None):
         parser.error("--paper-index must point to an existing SQLite index")
     upper_calls=args.max_tasks*(
         55 if args.no_baselines else
-        55+(args.baseline_samples or 55)+(0 if args.skip_vote6 else 6))
+        55+(args.baseline_samples or 55)+(0 if skip_vote6 else 6))
     if not args.confirm_free:
         print(json.dumps({"mode":"plan_only","tasks":min(len(tasks),args.max_tasks),
                           "per_task_deadline":args.deadline,
@@ -425,7 +454,7 @@ def main(argv=None):
                            rate_limits=rate_limits,
                            run_baselines=not args.no_baselines,
                            runner_config=cfg,
-                           skip_vote6=args.skip_vote6))
+                           skip_vote6=skip_vote6))
     finally:
         if index is not None:
             index.close()

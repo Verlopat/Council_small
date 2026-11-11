@@ -61,3 +61,32 @@ def hidden_case_outcome(response:object,hidden_spec:dict) -> str:
         "print(__council_json.dumps({'pass':__council_ok}))\n")
     outcome=run_python(code+harness,timeout=8).outcome
     return outcome if outcome in {"pass","fail"} else "error"
+
+
+def public_case_output(response:object,prompt:str) -> str | None:
+    """Execute f(xs) on an explicitly public literal input, never hidden gold."""
+    import ast
+    code=extract_function_source(response)
+    match=re.search(r'\bxs\s*=\s*(\[[^\[\]]{0,2000}\])',prompt)
+    if code is None or match is None or not available():
+        return None
+    try:
+        values=ast.literal_eval(match.group(1))
+    except (ValueError,SyntaxError,RecursionError):
+        return None
+    if (not isinstance(values,list) or len(values)>100
+            or any(type(x) is not int or abs(x)>10**12 for x in values)):
+        return None
+    harness=("\n\nimport json as __council_json\n"
+             f"__council_value=f({values!r})\n"
+             "if type(__council_value) is not int:\n"
+             "    raise TypeError('public result must be an integer')\n"
+             "print(__council_json.dumps({'result':__council_value}))\n")
+    result=run_python(code+harness,timeout=8,expect_pass_json=False)
+    if result.outcome!='ok':
+        return None
+    try:
+        value=json.loads(result.stdout.strip().splitlines()[-1])['result']
+    except (ValueError,IndexError,TypeError,KeyError):
+        return None
+    return str(value) if type(value) is int else None

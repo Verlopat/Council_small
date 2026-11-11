@@ -32,7 +32,7 @@ from council.translate import plan, decisive_if_supported
 from council.verify.ladder import verify
 from council.compose import compose_answer
 from council.workflow import CouncilRunner
-from council.final_answers import proposal_answers, extract_final_answer, normalize_answer
+from council.final_answers import select_candidate_answer, proposal_answers, extract_final_answer, normalize_answer
 from council.requirements import Requirements
 from council.vrf_sanity import scan_vrf_games, unsupported_full_sk_secrecy
 from council.vrf_audit import (scan_audit_issues, objection_conflicts,
@@ -944,6 +944,9 @@ class FullCouncilRunner(CouncilRunner):
             "requirements":req.as_data(),"actual_models":self.actual_models,
             "final_answer":None,  # peer-independent checks did not run
             "candidate_answers":proposal_answers(proposals,self.ledger)[1],
+            "answer_selection":select_candidate_answer(
+                proposal_answers(proposals,self.ledger)[1],
+                self.ledger.claims.values(),self.ledger.evidence.values(),proposals),
             "advisory_findings":findings,"reference_checks":self.reference_checks,
             "topic_consolidation":topics,
             "audit_advisory_findings":audit_advisories,
@@ -2169,6 +2172,9 @@ class FullCouncilRunner(CouncilRunner):
             "grounded_objection_verdicts":grounded,
             "final_answer":proposal_answers(proposals,self.ledger)[0],
             "candidate_answers":proposal_answers(proposals,self.ledger)[1],
+            "answer_selection":select_candidate_answer(
+                proposal_answers(proposals,self.ledger)[1],
+                self.ledger.claims.values(),self.ledger.evidence.values(),proposals),
             "translators_used":dict(self._translator_used),
             "translator_families_unavailable":sorted(self._translators_down),
             "topic_consolidation":topic_consolidation,
