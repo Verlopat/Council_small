@@ -614,7 +614,8 @@ class FullCouncilRunner(CouncilRunner):
                             assumptions=tuple(claim.assumptions),
                             high_stakes=True)
                         secondary_result = await asyncio.to_thread(
-                            verify, secondary_plan, secondary_artifact)
+                            verify, secondary_plan, secondary_artifact,
+                            paper_index=self.paper_index)
                         self.events.record(
                             "decisive_second_translation", claim_id=claim.id,
                             first_family=first_family,
@@ -1517,7 +1518,16 @@ class FullCouncilRunner(CouncilRunner):
             pipeline="evidence",
             requirements=req.as_data(),role_assignment=asdict(self.assignment),
             debate_caps=self.caps, solver_strategies=self.solver_strategies,
-            deadline_remaining=self.budget.remaining())
+            deadline_remaining=self.budget.remaining(),
+            per_call_timeout=getattr(self.transport,"timeout",None),
+            max_claims=self.max_claims,hunter_cap=self.hunter_cap,
+            enable_coverage=self.enable_coverage,
+            enable_relevance=self.enable_relevance,
+            critics=list(self.critics),adaptive_seeds=self.adaptive_seeds,
+            enable_repairs=self.enable_repairs,
+            paper_index_path=str(self.paper_index.path)
+                if self.paper_index is not None and
+                   hasattr(self.paper_index,"path") else None)
         # Reference is public and identical for every sealed, independent
         # proposal. Never include a truncated or unauthenticated RFC excerpt.
         rfc_refs=self._rfc_game_references(question)
@@ -1555,13 +1565,16 @@ class FullCouncilRunner(CouncilRunner):
                         "proposal/"+family+": no substantive claims after filtering")
                     continue
                 body=dict(body,claims=distinct)
+            previous_claims=set(self.ledger.claims)
             try:
                 p=self._proposal(family,body,index)
+                p["answer"]=body.get("answer") if isinstance(body.get("answer"),str) else p["approach"]
                 self._anchors(p,body)
                 self._register_answer_claim(p,question)
                 self._register_declared_dependencies(p,body)
-                p["answer"]=body.get("answer") if isinstance(body.get("answer"),str) else p["approach"]
             except (OutputError,ValueError):
+                for cid in set(self.ledger.claims)-previous_claims:
+                    self.ledger.claims.pop(cid,None)
                 self.warnings.append(family+": proposal failed validation")
                 continue
             proposals.append(p)
@@ -2285,6 +2298,7 @@ class QuickCouncilRunner(FullCouncilRunner):
                          solver_strategies=solver_strategies,
                          paper_index=paper_index,
                          max_claims=4,hunter_cap=0,
+                          auditor_family=None,
                          enable_coverage=False,enable_relevance=False,
                          critics=(),adaptive_seeds=False,enable_repairs=False)
 
