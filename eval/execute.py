@@ -144,7 +144,8 @@ async def run_task(task,transport,events,*,deadline,baseline_samples=0,
         for proposal in council.get("proposals",[]) or []:
             if not isinstance(proposal,dict):
                 continue
-            if (candidates and proposal.get("id")!=selection.get("proposal_id")):
+            if (selection.get("proposal_id") is not None and
+                    proposal.get("id")!=selection["proposal_id"]):
                 continue
             artifact=proposal.get("artifact") or {}
             if isinstance(artifact,dict):

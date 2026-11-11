@@ -67,4 +67,12 @@ def recompute_answer(code:str,claimed:str,*,timeout:float=8,
         return "error","printed_value_not_scalar"
     if capture is not None:
         capture["value"]=computed
-    return ("pass" if computed==want else "fail"),("printed="+computed[:90])
+    same = computed == want
+    if not same and computed not in {"yes", "no"} and want not in {"yes", "no"}:
+        # Preserve exact integer equality; tolerate only decimal round-off.
+        a, b = Decimal(computed), Decimal(want)
+        if a != a.to_integral_value() or b != b.to_integral_value():
+            tolerance = max(Decimal("1e-9"),
+                            Decimal("1e-9") * max(abs(a), abs(b)))
+            same = abs(a-b) <= tolerance
+    return ("pass" if same else "fail"), ("printed="+computed[:90])

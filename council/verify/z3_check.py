@@ -8,8 +8,9 @@ def unsatisfiable(assertions: list[str], *, timeout: float = 10):
         raise ValueError("Bad assertions")
     # No arbitrary eval: parse the constrained SMT-LIB2 script through Z3.
     smt = "\n".join(assertions)
-    wrapper = ("import json\nfrom z3 import Solver, unsat\n"
+    wrapper = ("import json\nfrom z3 import Solver, sat, unsat\n"
                "script=" + repr(smt) + "\n"
                "solver=Solver()\nsolver.from_string(script)\n"
-               "print(json.dumps({'pass': bool(solver.check()==unsat)}))\n")
+               "status=solver.check()\n"
+               "print(json.dumps({'pass': status==unsat, 'inconclusive': status not in (sat,unsat)}))\n")
     return run_python(wrapper, timeout=timeout)

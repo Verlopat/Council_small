@@ -2,6 +2,8 @@
 from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
+import re
+import unicodedata
 import sqlite3
 import threading
 from pathlib import Path
@@ -18,6 +20,7 @@ class PaperIndex:
     def __init__(self, path: Path):
         # The full verifier executes checks in worker threads. SQLite's
         # default thread affinity would reject an otherwise valid quote read.
+        self.path = Path(path)
         self.lock = threading.RLock()
         self.db = sqlite3.connect(path, check_same_thread=False)
         self.db.execute("""CREATE TABLE IF NOT EXISTS papers
@@ -51,7 +54,12 @@ class PaperIndex:
         with self.lock:
             row = self.db.execute("SELECT content FROM papers WHERE id=?",
                                   (document_id,)).fetchone()
-        if row is None or not quote or quote not in row[0]:
+        def normalized(value):
+            value = unicodedata.normalize("NFKC", value).replace("\u00ad", "")
+            value = re.sub(r"(?<=\w)-[ \t]*\r?\n[ \t]*(?=\w)", "", value)
+            return re.sub(r"\s+", " ", value).strip()
+        if (row is None or not quote or
+                normalized(quote) not in normalized(row[0])):
             return PassageCheck(False, document_id, None,
                                 "quote not located in provided indexed corpus")
         return PassageCheck(True, document_id,

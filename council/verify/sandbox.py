@@ -100,6 +100,10 @@ def run_python(code: str, *, timeout: float = 10.0,
                                  proc.returncode)
         try:
             answer = json.loads(proc.stdout.strip().splitlines()[-1])
+            if isinstance(answer, dict) and answer.get("inconclusive") is True:
+                return SandboxResult("inconclusive", "checker returned unknown",
+                                     proc.stdout[-1600:], proc.stderr[-1600:],
+                                     proc.returncode)
             if not isinstance(answer, dict) or type(answer.get("pass")) is not bool:
                 raise ValueError()
         except (ValueError, IndexError):

@@ -51,7 +51,9 @@ def check(tool:str,source:str,*,timeout:float=30)->DomainCheck:
           " if binary=='tamarin-prover':\n"
           "  confirmed=confirmed and 'verified' in stdout and 'falsified' not in stdout\n"
           " if binary=='proverif':\n"
-          "  confirmed=confirmed and 'result' in stdout and 'is true' in stdout\n"
+          "  import re\n"
+          "  answers=re.findall(r'(?im)^\\s*result\\b[^\\n]*?\\bis\\s+(true|false|unknown)\\b',stdout)\n"
+          "  confirmed=confirmed and bool(answers) and all(a=='true' for a in answers)\n"
           " print(json.dumps({'pass': bool(confirmed)}))\n")
     result=run_python(code,timeout=timeout)
     return DomainCheck(result.outcome,tool,
