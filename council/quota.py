@@ -1,6 +1,7 @@
 """FIFO endpoint quotas, shared account budgets and failure circuit breakers."""
 from __future__ import annotations
 import asyncio
+import math
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -26,10 +27,14 @@ class EndpointState:
     cooldown_until: float = 0
 
     def __post_init__(self):
-        if (self.rate_per_minute <= 0 or self.burst <= 0 or
+        if (not math.isfinite(self.rate_per_minute) or self.rate_per_minute <= 0
+                or type(self.burst) is not int or self.burst <= 0 or
                 self.tokens_per_minute is not None
                 and self.tokens_per_minute <= 0):
             raise ValueError("Quota rates and burst must be positive")
+        for cap in (self.daily_requests, self.daily_tokens, self.tokens_per_minute):
+            if cap is not None and (type(cap) is not int or cap <= 0):
+                raise ValueError("Quota caps must be positive integers")
         self.remaining = float(self.burst)
         self.refreshed_at = time.monotonic()
         self.day = datetime.now(timezone.utc).date().isoformat()
@@ -43,6 +48,7 @@ class QuotaScheduler:
         self.default_rate, self.default_burst = default_rate, default_burst
         self.states: dict[tuple[str, str], EndpointState] = {}
         self.locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+        self.shared_day: dict[str, str] = {}
         self.shared_daily: dict[str, int] = {}
         self.shared_usage: dict[str, int] = defaultdict(int)
         self.shared_daily_tokens: dict[str,int] = {}
@@ -75,8 +81,17 @@ class QuotaScheduler:
                       expected_tokens: int = 0) -> None:
         if expected_tokens < 0:
             raise ValueError("Token estimate must be non-negative")
-        # Holding a provider lock while sleeping gives FIFO access for that provider.
-        async with self.locks[provider]:
+        if not math.isfinite(deadline):
+            raise ValueError("Deadline must be finite")
+        # Queueing itself consumes the deadline, even behind a long-lived call.
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise QuotaContention("Global deadline reached in provider queue")
+        try:
+            await asyncio.wait_for(self.locks[provider].acquire(), remaining)
+        except TimeoutError:
+            raise QuotaContention("Global deadline reached in provider queue") from None
+        try:
             state = self.state(provider, model)
             while True:
                 now = time.monotonic()
@@ -85,6 +100,10 @@ class QuotaScheduler:
                 today = datetime.now(timezone.utc).date().isoformat()
                 if today != state.day:
                     state.day, state.requests_today, state.tokens_today = today, 0, 0
+                # Reset shared counters once per account/day, not once for
+                # every endpoint first visited after midnight.
+                if self.shared_day.get(provider) != today:
+                    self.shared_day[provider] = today
                     self.shared_usage[provider] = 0
                     self.shared_used_tokens[provider] = 0
                 if state.consecutive_failures >= 3 and state.cooldown_until > now:
@@ -132,6 +151,9 @@ class QuotaScheduler:
                     raise QuotaContention("No quota can arrive before request deadline")
                 await asyncio.sleep(min(wait, deadline - now))
 
+        finally:
+            self.locks[provider].release()
+
     def observe(self, provider: str, model: str, headers: dict,
                 *, input_tokens: int | None = None,
                 output_tokens: int | None = None,
@@ -144,7 +166,7 @@ class QuotaScheduler:
                 state.remaining = min(state.remaining, max(0, float(remaining)))
             except ValueError:
                 pass
-        if input_tokens is not None or output_tokens is not None:
+        if input_tokens is not None and output_tokens is not None:
             # Reconcile with estimate separately at the caller; this is
             # authoritative observed usage, not an inferred token count.
             observed = max(0,int(input_tokens or 0)) + max(0,int(output_tokens or 0))
@@ -155,7 +177,7 @@ class QuotaScheduler:
             if provider in self.shared_tpm_cap:
                 cap=self.shared_tpm_cap[provider]
                 self.shared_tpm_available[provider]=min(float(cap),
-                    max(0.,self.shared_tpm_available[provider]-delta))
+                    self.shared_tpm_available[provider]-delta)
         ra = retry_after_seconds(lowered.get("retry-after"))
         if ra is not None and ra > 0:
             state.cooldown_until = max(state.cooldown_until, time.monotonic() + ra)

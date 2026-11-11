@@ -1,6 +1,7 @@
 """A single monotonic wall-clock budget, including the synthesis reserve."""
 from __future__ import annotations
 from dataclasses import dataclass
+import math
 import time
 
 @dataclass(frozen=True)
@@ -10,7 +11,8 @@ class RunBudget:
 
     @classmethod
     def start(cls, seconds: float, reserve: float = 15.0) -> "RunBudget":
-        if seconds <= 0 or reserve < 0:
+        if (not math.isfinite(seconds) or not math.isfinite(reserve)
+                or seconds <= 0 or reserve < 0):
             raise ValueError("Invalid request deadline")
         return cls(time.monotonic() + seconds, min(reserve, seconds))
 

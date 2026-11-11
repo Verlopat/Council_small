@@ -137,9 +137,14 @@ class FamilyTransport:
             retry_after = None
             http_status = None
             try:
+                call_deadline = time.monotonic() + allowed
                 await self.quota.acquire(entry.provider, entry.model,
-                    deadline=time.monotonic() + allowed,
+                    deadline=call_deadline,
                     expected_tokens=estimated_tokens)
+                allowed = min(call_deadline - time.monotonic(),
+                              budget.allowed(endpoint_timeout, synthesis=synthesis))
+                if allowed <= 0:
+                    raise TimeoutError()
                 # Same allowlist/catalog safeguards as the original router.
                 options = await asyncio.wait_for(
                     asyncio.to_thread(self.router.expand, candidate, seen),
@@ -148,7 +153,8 @@ class FamilyTransport:
                     raise CandidateError("Model not in permitted catalog", kind="model_unavailable")
                 seen.add((entry.provider, entry.model))
                 t0 = time.monotonic()
-                timeout = min(allowed, budget.allowed(endpoint_timeout, synthesis=synthesis))
+                timeout = min(call_deadline - time.monotonic(),
+                              budget.allowed(endpoint_timeout, synthesis=synthesis))
                 if timeout <= 1:
                     raise TimeoutError()
                 sep = chr(10) + 'DATA_JSON:' + chr(10)
@@ -219,12 +225,6 @@ class FamilyTransport:
                             safe_status=int(matched.group(1)) if matched else None
                         except (TypeError,ValueError):
                             pass
-                        self.record("model_call_retry",role=role,family=family,
-                            provider=entry.provider,model=entry.model,
-                            kind=exc.kind,http_status=safe_status,
-                            attempt=2,delay_seconds=delay,
-                            max_output_tokens=output_tokens,
-                            formatting="none" if formatting is None else "structured")
                         await asyncio.sleep(delay)
                         remaining=budget.allowed(endpoint_timeout,
                                                  synthesis=synthesis)
@@ -232,11 +232,21 @@ class FamilyTransport:
                             raise
                         # Every retry consumes a separately reserved request.
                         estimated_tokens=max(1,len(message)//3)+output_tokens
+                        retry_deadline=time.monotonic()+remaining
                         await self.quota.acquire(
                             entry.provider, entry.model,
-                            deadline=time.monotonic()+remaining,
+                            deadline=retry_deadline,
                             expected_tokens=estimated_tokens)
-                        timeout=min(remaining,endpoint_timeout)
+                        timeout=min(retry_deadline-time.monotonic(),
+                                    budget.allowed(endpoint_timeout,synthesis=synthesis))
+                        if timeout <= 1:
+                            raise TimeoutError()
+                        self.record("model_call_retry",role=role,family=family,
+                            provider=entry.provider,model=entry.model,
+                            kind=exc.kind,http_status=safe_status,
+                            attempt=2,delay_seconds=delay,
+                            max_output_tokens=output_tokens,
+                            formatting="none" if formatting is None else "structured")
                 if not text.strip():
                     raise CandidateError("Empty response", kind="invalid_response")
                 elapsed = time.monotonic() - t0

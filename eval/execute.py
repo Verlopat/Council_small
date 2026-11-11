@@ -46,6 +46,12 @@ def canonical_vote_answer(text: str) -> str:
     return final
 
 
+def recorded_calls(events):
+    """Count provider attempts, including completed-request retries."""
+    return sum(e["event"] in {"model_call_started", "model_call_retry"}
+               for e in events.replay())
+
+
 def requested_baseline_calls(council_calls: int, *, user_limit: int = 0,
                              safety_cap: int = 55) -> int:
     """Default: match Council's API-call count, subject to an explicit cap.
@@ -92,7 +98,7 @@ async def run_task(task,transport,events,*,deadline,baseline_samples=0,
         raise ValueError("mode must be quick or full")
     council=(await runner.run(q,mode="quick") if mode=="quick"
              else await runner.run(q))
-    model_calls=sum(e["event"]=="model_call_started" for e in events.replay())
+    model_calls=recorded_calls(events)
     result=council["research_result"]
     final=council.get("final_answer")
     candidates=council.get("candidate_answers") or {}
@@ -161,6 +167,8 @@ async def run_task(task,transport,events,*,deadline,baseline_samples=0,
             "Two modes compared on the same task; no model baseline was run")
         return [output]
     baseline_outputs=[]
+    baseline_start=recorded_calls(events)
+    single_calls=1
     baseline_budget=RunBudget.start(deadline,reserve=0)
     target_samples = requested_baseline_calls(
         model_calls, user_limit=baseline_samples)
@@ -172,8 +180,14 @@ async def run_task(task,transport,events,*,deadline,baseline_samples=0,
             response=await transport.complete(
                 "gpt-oss",q,baseline_budget,role="baseline",synthesis=True)
             baseline_outputs.append(response.text)
+            if len(baseline_outputs)==1:
+                single_calls=max(1,recorded_calls(events)-baseline_start)
         except FamilyUnavailable:
             break
+    # Uninstrumented test/custom transports still have one call per response.
+    # Real transports include failed calls, fallbacks and retries in the log.
+    baseline_calls=max(len(baseline_outputs),
+                       recorded_calls(events)-baseline_start)
     if baseline_outputs:
         # Vote on final answers rather than string-identical explanations.
         # Use raw code text for code tasks, where matching a sample integer
@@ -184,8 +198,8 @@ async def run_task(task,transport,events,*,deadline,baseline_samples=0,
                      else baseline_outputs)
         vote=majority(vote_inputs)
         base={"task_id":task["id"],"system":"self_consistency",
-              "answer":vote.answer,"calls":len(baseline_outputs),
-              "equal_budget":len(baseline_outputs)==model_calls,
+              "answer":vote.answer,"calls":baseline_calls,
+              "equal_budget":baseline_calls==model_calls,
               "unresolved":vote.answer is None}
         if "expected" in task:
             base["correct"]=int(matches_expected(str(vote.answer or ""),
@@ -193,8 +207,8 @@ async def run_task(task,transport,events,*,deadline,baseline_samples=0,
         else:base["correct"]=None
         output_base=[base]
         single={"task_id":task["id"],"system":"single",
-                "answer":baseline_outputs[0],"calls":1,
-                "equal_budget":model_calls==1,"unresolved":False}
+                "answer":baseline_outputs[0],"calls":single_calls,
+                "equal_budget":model_calls==single_calls,"unresolved":False}
         single["correct"]=(int(matches_expected(baseline_outputs[0],str(task["expected"])))
                            if "expected" in task else None)
         output_base.append(single)
@@ -216,8 +230,8 @@ async def run_task(task,transport,events,*,deadline,baseline_samples=0,
                     return False,0.0
             selected=best_of_n(baseline_outputs,tool_selector)
             best={"task_id":task["id"],"system":"best_of_n",
-                  "answer":selected.answer,"calls":len(baseline_outputs),
-                  "equal_budget":len(baseline_outputs)==model_calls,
+                  "answer":selected.answer,"calls":baseline_calls,
+                  "equal_budget":baseline_calls==model_calls,
                   "oracle_assisted":True,
                   "comparison_eligible":False,
                   "unresolved":selected.answer is None}
@@ -233,8 +247,8 @@ async def run_task(task,transport,events,*,deadline,baseline_samples=0,
                 lambda answer:(bool(extract_function_source(answer)),
                                float(bool(extract_function_source(answer)))))
             best={"task_id":task["id"],"system":"best_of_n",
-                  "answer":selected.answer,"calls":len(baseline_outputs),
-                  "equal_budget":len(baseline_outputs)==model_calls,
+                  "answer":selected.answer,"calls":baseline_calls,
+                  "equal_budget":baseline_calls==model_calls,
                   "unresolved":selected.answer is None,
                   "correct":None}
             output_base.append(best)
@@ -254,6 +268,7 @@ async def run_task(task,transport,events,*,deadline,baseline_samples=0,
     # Plain cross-family voting is a distinct control from repeated gpt-oss.
     # Six families are required; a provider endpoint never gets an extra vote.
     family_outputs={}
+    family_start=recorded_calls(events)
     families=("gpt-oss","command","gemma","nemotron","gemini","glm")
     family_budget=RunBudget.start(deadline,reserve=0)
     for family in families:
@@ -268,9 +283,10 @@ async def run_task(task,transport,events,*,deadline,baseline_samples=0,
         family_outputs={family:canonical_vote_answer(text)
                         for family,text in family_outputs.items()}
     vote6=family_vote(family_outputs)
+    family_calls=max(vote6.calls,recorded_calls(events)-family_start)
     vote_row={"task_id":task["id"],"system":"vote6",
-              "answer":vote6.answer,"calls":vote6.calls,
-              "equal_budget":vote6.calls==model_calls,
+              "answer":vote6.answer,"calls":family_calls,
+              "equal_budget":family_calls==model_calls,
               "independent_families":len(family_outputs),
               "unresolved":vote6.answer is None}
     vote_row["correct"]=(int(matches_expected(str(vote6.answer or ""),

@@ -139,6 +139,22 @@ semantic validation; `correct_verified` can legitimately remain zero even
 when the predicted result matches the benchmark's hidden reference.
 Blindly forcing a positive verified flag is explicitly disallowed.
 
+## Quota and evaluation corrections (November 11)
+
+Shared daily counters roll over once per provider account, including when
+several model endpoints are used after midnight. Queue waiting and catalog
+lookup consume the endpoint timeout; retries recheck the remaining deadline
+after quota waiting. Partial token reports retain the conservative reservation,
+and observed TPM overages remain debt until replenished. Configuration rejects
+nonfinite rates and fractional burst sizes.
+
+Phase-A call counts include retries and failed baseline requests. A retry is
+recorded only after its quota reservation succeeds, immediately before dispatch.
+Older run databases may include scheduled retries that never dispatched; rerun
+evaluations to use the corrected accounting. Equal call counts still do not mean
+equal tokens or provider charges. These changes have offline regression coverage;
+provider-account behavior and sandbox isolation require local validation.
+
 ## Safety and limitations
 
 - **Sandbox:** Generated verification code executes only in fail-closed bubblewrap isolation. Check deployment with `python -m council.preflight --json`. SymPy and Z3 are declared dependencies; Lean/Tamarin/ProVerif are optional external tools.
