@@ -5,38 +5,16 @@ comparison means that the author's code prints its own claimed scalar.
 """
 from __future__ import annotations
 import ast
-from decimal import Decimal,InvalidOperation
+from fractions import Fraction
 from council.verify.sandbox import run_python
-from council.final_answers import normalize_answer
+from council.final_answers import canonical_scalar
 
 
 PRELUDE="import json, math, itertools, functools, fractions\n"
 
 
-def _canonical(value:object)->str|None:
-    if type(value) is bool:
-        return "yes" if value else "no"
-    if type(value) in (int,float,Decimal):
-        try:
-            num=Decimal(str(value))
-            return format(num.normalize(),"f") if num.is_finite() else None
-        except (InvalidOperation,ValueError):
-            return None
-    if not isinstance(value,str):
-        return None
-    scalar=normalize_answer(value)
-    if scalar is None:
-        return None
-    if scalar.lower() in {"yes","true"}:
-        return "yes"
-    if scalar.lower() in {"no","false"}:
-        return "no"
-    try:
-        num=Decimal(scalar)
-        return format(num.normalize(),"f") if num.is_finite() else None
-    except InvalidOperation:
-        return None
-
+# Keep author-code normalization identical to executed-family voting.
+_canonical=canonical_scalar
 
 def recompute_answer(code:str,claimed:str,*,timeout:float=8,
                      capture:dict|None=None)->tuple[str,str]:
@@ -70,9 +48,10 @@ def recompute_answer(code:str,claimed:str,*,timeout:float=8,
     same = computed == want
     if not same and computed not in {"yes", "no"} and want not in {"yes", "no"}:
         # Preserve exact integer equality; tolerate only decimal round-off.
-        a, b = Decimal(computed), Decimal(want)
-        if a != a.to_integral_value() or b != b.to_integral_value():
-            tolerance = max(Decimal("1e-12"),
-                            Decimal("2e-15") * max(abs(a), abs(b)))
-            same = abs(a-b) <= tolerance
+        if computed != "no solution" and want != "no solution":
+            a, b = Fraction(computed), Fraction(want)
+            if a.denominator != 1 or b.denominator != 1:
+                tolerance = max(Fraction("1e-12"),
+                                Fraction("2e-15") * max(abs(a), abs(b)))
+                same = abs(a-b) <= tolerance
     return ("pass" if same else "fail"), ("printed="+computed[:90])
