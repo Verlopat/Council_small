@@ -181,7 +181,7 @@ def normalize_topic_judgment(topic: str, reference: dict, versions: list[dict],
     # best version. An unquoted 'match' is downgraded above.
     selected=next((r for r in rows if r["id"]==best),None)
     if not (source_complete and selected and selected["reference_quote"] and
-            selected["status"] in {"matches","incomplete"}):
+            selected["status"] == "matches"):
         best=None
     partial=[]
     if source_complete:
