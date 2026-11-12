@@ -87,6 +87,14 @@ class FullModeFallbackTests(unittest.IsolatedAsyncioTestCase):
 
 
 class FullModePreflightTests(unittest.TestCase):
+    def test_explicit_vrf_game_names_are_definition_requests(self):
+        from council.definition_sources import is_vrf_definition_question
+        question=("Define full uniqueness, trusted uniqueness, and "
+                  "pseudorandomness for VRFs according to RFC 9381.")
+        self.assertTrue(is_vrf_definition_question(question))
+        self.assertFalse(is_vrf_definition_question(
+            "Prove security of a VRF construction under LWE."))
+
     def test_missing_official_rfc_fails_before_live_api_calls(self):
         with tempfile.TemporaryDirectory() as temp:
             previous = Path.cwd()
