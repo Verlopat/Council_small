@@ -1,6 +1,7 @@
 """Parse untrusted model JSON without executing content or fabricating missing data."""
 from __future__ import annotations
 import json
+import re
 from typing import Any
 
 class OutputError(ValueError):
@@ -11,22 +12,35 @@ def parse_object(text: str) -> dict[str, Any]:
         raise OutputError("Empty model output")
     raw = text.strip()
     decoder = json.JSONDecoder()
-    # A model may surround its JSON with fences/prose. Never eval expressions.
-    # Decode ONLY the first outer object, never a nested object from a
-    # truncated reply. Invalid/truncated JSON must not produce default votes.
-    pos = raw.find("{")
-    if pos < 0:
+    # Prefer explicit fenced JSON, then a left-aligned outer object. Braces
+    # inside prose, math sets, and LaTeX must not shadow the intended reply.
+    # Never scan arbitrary indented/nested positions in truncated JSON.
+    positions = [m.start(1) for m in re.finditer(
+        r"```(?:json)?\\s*\\n?\\s*(\\{)", raw, re.I)]
+    positions += [m.start() for m in re.finditer(r"(?m)^\\{", raw)]
+    first = raw.find("{")
+    if first >= 0:
+        positions.append(first)
+    if not positions:
         raise OutputError("No JSON object in model output")
-    try:
-        value, end = decoder.raw_decode(raw[pos:])
-    except (ValueError, TypeError) as exc:
-        raise OutputError("Incomplete or invalid outer JSON object") from exc
-    if not isinstance(value, dict):
-        raise OutputError("The outer JSON value must be an object")
-    remainder = raw[pos + end:].strip()
-    if remainder.startswith(("{", "[")):
-        raise OutputError("Multiple JSON values in model output")
-    return value
+    seen = set()
+    last_error = None
+    for pos in positions:
+        if pos in seen:
+            continue
+        seen.add(pos)
+        try:
+            value, end = decoder.raw_decode(raw[pos:])
+        except (ValueError, TypeError) as exc:
+            last_error = exc
+            continue
+        if not isinstance(value, dict):
+            continue
+        remainder = raw[pos + end:].strip()
+        if remainder.startswith(("{", "[")):
+            raise OutputError("Multiple JSON values in model output")
+        return value
+    raise OutputError("Incomplete or invalid outer JSON object") from last_error
 
 def require_string(obj: dict, name: str) -> str:
     value = obj.get(name)
