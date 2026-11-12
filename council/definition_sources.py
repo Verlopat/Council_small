@@ -34,7 +34,7 @@ SECTION_HEADINGS = {section: heading for _, heading, section in DEFINITIONS}
 def is_vrf_definition_question(question: str) -> bool:
     """True only for VRF game/definition explanations, not proofs of security."""
     q=topic_text(question)
-    return bool(re.search(r"\bvrf\b|verifiable random function",q)
+    return bool(re.search(r"\bvrfs?\b|verifiable random functions?",q)
                 and re.search(r"\b(?:explain|define|describe|compare|what\s+are|what\s+is)\b",q)
                 and (re.search(r"\b(?:security\s+)?games?\b|\bdefinitions?\b",q)
                      or re.search(r"\bfull uniqueness\b|\btrusted uniqueness\b|"
@@ -52,7 +52,7 @@ def game_step(question: str, statement: str) -> bool:
     RFC subsection.
     """
     question_norm=topic_text(question)
-    if not re.search(r"\bvrf\b|verifiable random function",question_norm):
+    if not re.search(r"\bvrfs?\b|verifiable random functions?",question_norm):
         return False
     if not re.search(r"\b(?:security\s+)?games?\b|\buniqueness\b|\bpseudorandom",question_norm):
         return False
@@ -67,7 +67,7 @@ def game_step(question: str, statement: str) -> bool:
 
 
 def classify(question: str, statement: str) -> tuple[str, str] | None:
-    if not re.search(r"\bvrf\b|verifiable random function", question, re.I):
+    if not re.search(r"\bvrfs?\b|verifiable random functions?", question, re.I):
         return None
     text = topic_text(statement)
     # Do not skip genuine construction, formal reduction, empirical claim,
