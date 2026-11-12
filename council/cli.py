@@ -304,6 +304,8 @@ def main(argv=None) -> int:
                     enable_repairs=(saved_cfg.get("optional",{}).get(
                         "repair_round",metadata.get("enable_repairs",True))),
                     solver_strategies=metadata.get("solver_strategies",{}),
+                    auditor_fallbacks=tuple(
+                        saved_cfg.get("optional",{}).get("audit_fallbacks",())),
                     paper_index=(PaperIndex(replay_paper_path)
                                  if replay_paper_path else None))
             else:
@@ -338,12 +340,39 @@ def main(argv=None) -> int:
                             ((cfg.auditor if cfg else AUDITOR) if args.mode == "research" else None),
                           "deadline": args.deadline, "api_calls": 0}, indent=2))
         return 0
+    # Full VRF game comparisons need a complete, authentic indexed source.
+    # Refuse to burn free-tier API calls on an ungrounded comparison.
+    from council.definition_sources import is_vrf_definition_question
+    needs_rfc=(args.mode=="full" and is_vrf_definition_question(question))
+    if needs_rfc and args.paper_index is None:
+        default_index=Path("runs/papers.sqlite3")
+        if default_index.is_file():
+            args.paper_index=default_index
+    if needs_rfc and args.paper_index is None:
+        parser.error("Full VRF definition mode requires the official RFC 9381 "
+                     "index. Run: python -m council.rfc_index "
+                     "--db runs/papers.sqlite3 ; then rerun with "
+                     "--paper-index runs/papers.sqlite3")
     paper_index=None
     if args.paper_index:
         from council.verify.source import PaperIndex
         paper_index=PaperIndex(args.paper_index)
+        if needs_rfc:
+            complete=all(
+                (row:=paper_index.rfc_section_excerpt(section,max_chars=10000))
+                is not None and not row.get("truncated")
+                and row.get("source_uri")=="https://www.rfc-editor.org/rfc/rfc9381.txt"
+                for section in ("3.1","3.3","3.4"))
+            if not complete:
+                paper_index.close()
+                parser.error("Index lacks complete official RFC 9381 sections "
+                             "3.1, 3.3 and 3.4. Rebuild using: "
+                             "python -m council.rfc_index --db runs/papers.sqlite3")
     run_id = args.run_id or uuid.uuid4().hex[:16]
-    budget = RunBudget.start(args.deadline, reserve=min(20.0, args.deadline / 3))
+    synthesis_reserve=(min(args.deadline/2, max(20.0,
+                           min(180.0,args.deadline*0.30)))
+                       if args.mode=="full" else min(20.0,args.deadline/3))
+    budget = RunBudget.start(args.deadline, reserve=synthesis_reserve)
     with EventStore(args.run_dir, run_id) as events:
         transport = FamilyTransport(timeout=(
             args.timeout if args.timeout is not None else
@@ -376,7 +405,9 @@ def main(argv=None) -> int:
                 adaptive_seeds=(cfg.optional.get("adaptive_seeds",False) if cfg else False),
                 enable_repairs=(cfg.optional.get("repair_round",True) if cfg else True),
                 caps=(cfg.caps if cfg else {}), paper_index=paper_index,
-                solver_strategies=(cfg.solver_strategies if cfg else None))
+                solver_strategies=(cfg.solver_strategies if cfg else None),
+                auditor_fallbacks=(tuple(cfg.optional.get("audit_fallbacks",()))
+                                   if cfg else ()))
         elif args.mode == "quick":
             from council.full import QuickCouncilRunner
             from council.requirements import Requirements
