@@ -73,6 +73,16 @@ def load_config(path:Path)->CouncilConfig:
             for s in cfg.solver_strategies.values())):
         raise ValueError("Unsupported solver strategy")
     _=cfg.assignment
+    fallbacks=cfg.optional.get("audit_fallbacks",[])
+    reserved=set(cfg.solvers) | {cfg.translator,cfg.judge,cfg.auditor} | set(
+        cfg.optional.get("critics",[]))
+    if (not isinstance(fallbacks,list)
+            or len(set(str(x) for x in fallbacks))!=len(fallbacks)
+            or any(not isinstance(x,str) or x not in FAMILIES or x in reserved
+                   for x in fallbacks)):
+        raise ValueError("audit_fallbacks must be distinct unused model families")
+    if fallbacks and cfg.auditor is None:
+        raise ValueError("audit_fallbacks require an assigned primary auditor")
     for provider,detail in cfg.rate_limits.items():
         allowed={"requests_per_minute","tokens_per_minute","burst",
                  "daily_requests","daily_tokens"}
