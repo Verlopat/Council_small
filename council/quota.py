@@ -1,7 +1,12 @@
 """FIFO endpoint quotas, shared account budgets and failure circuit breakers."""
 from __future__ import annotations
 import asyncio
+import fcntl
+import json
 import math
+import os
+import tempfile
+from pathlib import Path
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -44,8 +49,12 @@ class QuotaScheduler:
 
     Configured quotas are *user-supplied*; defaults must not be treated as provider limits.
     """
-    def __init__(self, *, default_rate: float = 1.0, default_burst: int = 1):
+    def __init__(self, *, default_rate: float = 1.0, default_burst: int = 1,
+                 daily_state_file: Path | None = None):
         self.default_rate, self.default_burst = default_rate, default_burst
+        # Shared UTC-day budgets survive separate CLI runs and subprocesses.
+        self.daily_state_file = (Path(daily_state_file) if daily_state_file
+                                 is not None else None)
         self.states: dict[tuple[str, str], EndpointState] = {}
         self.provider_states: dict[str, EndpointState] = {}
         self.locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
@@ -59,6 +68,80 @@ class QuotaScheduler:
         self.shared_tpm_cap: dict[str,int] = {}
         self.shared_tpm_available: dict[str,float] = {}
         self.shared_tpm_updated: dict[str,float] = {}
+
+    def _daily_commit(self, provider: str, day: str, *,
+                      requests: int = 0, tokens: int = 0,
+                      enforce_caps: bool = False) -> None:
+        """Reserve or reconcile shared UTC-day usage under an OS file lock.
+
+        Calls from different Python processes cannot independently spend the
+        same remaining allowance. Only provider names and usage are saved;
+        secrets, prompts and answers are never persisted.
+        """
+        def apply(used_requests: int, used_tokens: int) -> tuple[int, int]:
+            next_requests = max(0, used_requests + requests)
+            next_tokens = max(0, used_tokens + tokens)
+            if enforce_caps:
+                if (provider in self.shared_daily and
+                        next_requests > self.shared_daily[provider]):
+                    raise QuotaContention("Shared account allowance exhausted")
+                if (provider in self.shared_daily_tokens and
+                        next_tokens > self.shared_daily_tokens[provider]):
+                    raise QuotaContention("Shared account token allowance exhausted")
+            return next_requests, next_tokens
+
+        if self.daily_state_file is None:
+            req, tok = apply(self.shared_usage[provider],
+                             self.shared_used_tokens[provider])
+        else:
+            path = self.daily_state_file
+            temporary = None
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                # The lock file is separate from the atomically replaced data.
+                lockfd = os.open(str(path) + ".lock", os.O_CREAT | os.O_RDWR, 0o600)
+                with os.fdopen(lockfd, "r+") as lock:
+                    fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+                    if path.exists():
+                        state = json.loads(path.read_text(encoding="utf-8"))
+                        if (not isinstance(state, dict) or state.get("version") != 1
+                                or not isinstance(state.get("providers"), dict)):
+                            raise ValueError("Unknown quota-state file format")
+                    else:
+                        state = {"version": 1, "providers": {}}
+                    prior = state["providers"].get(provider, {})
+                    if not isinstance(prior, dict):
+                        raise ValueError("Invalid persisted provider quota")
+                    if prior.get("day") == day:
+                        used_requests, used_tokens = (prior.get("requests", 0),
+                                                      prior.get("tokens", 0))
+                        if (type(used_requests) is not int or used_requests < 0
+                                or type(used_tokens) is not int or used_tokens < 0):
+                            raise ValueError("Invalid persisted quota counters")
+                    else:
+                        used_requests, used_tokens = 0, 0
+                    req, tok = apply(used_requests, used_tokens)
+                    state["providers"][provider] = {
+                        "day": day, "requests": req, "tokens": tok}
+                    with tempfile.NamedTemporaryFile(
+                            mode="w", encoding="utf-8", dir=path.parent,
+                            prefix="." + path.name + ".", delete=False) as stream:
+                        temporary = Path(stream.name)
+                        os.chmod(temporary, 0o600)
+                        json.dump(state, stream, sort_keys=True)
+                        stream.write("\n")
+                        stream.flush()
+                        os.fsync(stream.fileno())
+                    os.replace(temporary, path)
+            except (OSError, UnicodeError, ValueError, TypeError) as exc:
+                # Never silently reset counters and spend more API quota.
+                raise QuotaContention("Persistent daily quota state unavailable") from exc
+            finally:
+                if temporary is not None and temporary.exists():
+                    temporary.unlink()
+        self.shared_day[provider] = day
+        self.shared_usage[provider] = req
+        self.shared_used_tokens[provider] = tok
 
     def configure(self, provider: str, model: str, *, rate_per_minute: float,
                   burst: int = 1, daily_requests: int | None = None,
@@ -141,10 +224,12 @@ class QuotaScheduler:
                 if (state.daily_tokens is not None and
                     state.tokens_today + expected_tokens > state.daily_tokens):
                     raise QuotaContention("Daily token allowance exhausted")
-                if (provider in self.shared_daily and
+                if (self.daily_state_file is None and
+                    provider in self.shared_daily and
                     self.shared_usage[provider] >= self.shared_daily[provider]):
                     raise QuotaContention("Shared account allowance exhausted")
-                if (provider in self.shared_daily_tokens and
+                if (self.daily_state_file is None and
+                    provider in self.shared_daily_tokens and
                     self.shared_used_tokens[provider] + expected_tokens >
                     self.shared_daily_tokens[provider]):
                     raise QuotaContention("Shared account token allowance exhausted")
@@ -164,27 +249,30 @@ class QuotaScheduler:
                     wait = max(wait, max(0.0, 1.0 - account.remaining)
                                * 60.0 / account.rate_per_minute)
                 cap=self.shared_tpm_cap.get(provider)
+                # An oversize estimate waits for a full TPM bucket rather
+                # than permanently disabling this model. The upstream API
+                # may still enforce a stricter single-request limit.
+                reserved_tpm = min(expected_tokens, cap) if cap is not None else 0
                 if cap is not None:
-                    if expected_tokens > cap:
-                        raise QuotaContention(
-                            "Estimated request exceeds configured provider TPM cap")
                     last=self.shared_tpm_updated[provider]
                     tokens=min(float(cap),
                                self.shared_tpm_available[provider]+
                                max(0,now-last)*cap/60.0)
                     self.shared_tpm_available[provider]=tokens
                     self.shared_tpm_updated[provider]=now
-                    wait=max(wait,max(0.0,expected_tokens-tokens)*60.0/cap)
+                    wait=max(wait,max(0.0,reserved_tpm-tokens)*60.0/cap)
                 if wait <= 0:
+                    # Atomically reserve the account-wide daily allowance
+                    # BEFORE consuming endpoint/RPM/TPM buckets.
+                    self._daily_commit(provider,today,requests=1,
+                                       tokens=expected_tokens,enforce_caps=True)
                     state.remaining -= 1
                     if account is not None:
                         account.remaining -= 1
                     if cap is not None:
-                        self.shared_tpm_available[provider]-=expected_tokens
+                        self.shared_tpm_available[provider]-=reserved_tpm
                     state.requests_today += 1
                     state.tokens_today += expected_tokens
-                    self.shared_usage[provider] += 1
-                    self.shared_used_tokens[provider] += expected_tokens
                     return
                 if now + wait >= deadline:
                     raise QuotaContention("No quota can arrive before request deadline")
@@ -215,8 +303,9 @@ class QuotaScheduler:
             observed = max(0,int(input_tokens or 0)) + max(0,int(output_tokens or 0))
             delta = observed - max(0,reserved_tokens)
             state.tokens_today = max(0,state.tokens_today + delta)
-            self.shared_used_tokens[provider] = max(0,
-                self.shared_used_tokens[provider] + delta)
+            self._daily_commit(
+                provider, datetime.now(timezone.utc).date().isoformat(),
+                tokens=delta)
             if provider in self.shared_tpm_cap:
                 cap=self.shared_tpm_cap[provider]
                 self.shared_tpm_available[provider]=min(float(cap),
