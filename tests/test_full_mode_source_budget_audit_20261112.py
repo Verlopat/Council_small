@@ -86,6 +86,23 @@ class FullModeFallbackTests(unittest.IsolatedAsyncioTestCase):
                                 auditor_fallbacks=(fallback,))
 
 
+class SourceAlignmentSafetyTests(unittest.TestCase):
+    def test_incomplete_definition_cannot_be_marked_fully_selected(self):
+        from council.judge import normalize_topic_judgment
+        source = {"section": "3.3", "excerpt": "Honestly generated keys with known SK.",
+                  "truncated": False}
+        versions = [{"id": "p1:c2", "statement": "Only honest keys.",
+                     "flags": []}]
+        opinion = {"versions": [{"id": "p1:c2", "status": "incomplete",
+                                "reference_quote": "Honestly generated keys",
+                                "reason": "Missing adversary's secret-key knowledge"}],
+                   "best_version_id": "p1:c2"}
+        result = normalize_topic_judgment(
+            "trusted_uniqueness", source, versions, opinion)
+        self.assertIsNone(result["best_version_id"])
+        self.assertFalse(result["verified"])
+
+
 class FullModePreflightTests(unittest.TestCase):
     def test_explicit_vrf_game_names_are_definition_requests(self):
         from council.definition_sources import is_vrf_definition_question
