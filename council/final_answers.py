@@ -5,6 +5,7 @@ current, aligned, independently checked passing evidence.
 """
 from __future__ import annotations
 import re
+from fractions import Fraction
 from council.models import ClaimStatus
 
 NUM=r"[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?:[eE][+-]?\d+)?"
@@ -29,6 +30,9 @@ def normalize_answer(value:object)->str|None:
     item=item.strip().strip('"').strip("'").strip()
     item=re.sub(r"(?i)^final\s+answer\s*[:=]\s*", "", item).strip()
     item=item.rstrip("!?").strip()
+    # Formatting around an explicit scalar is not part of its value.
+    item=re.sub(r"^[$€£]\\s*", "", item)
+    item=re.sub(r"(?<=\\d)\\.$", "", item)
     if re.fullmatch(r"(?i)no\s+solutions?(?:\s+exists?)?\.?", item):
         return "no solution"
     if re.fullmatch(NUM, item):
@@ -44,6 +48,20 @@ def normalize_answer(value:object)->str|None:
             return str(value.numerator) + "/" + str(value.denominator)
         except (ZeroDivisionError, ValueError):
             return None
+    # A number plus one short, nonnumeric unit is still unambiguous.
+    # Never treat a second quantity or a modular annotation as a unit.
+    unit=re.fullmatch(rf"({NUM})\\s*[A-Za-z%°][A-Za-z%° ]{{0,30}}\\.?",item)
+    if unit:
+        return unit.group(1).replace(",", "")
+    prefix=re.match(r"(?i)(yes|no|true|false)\\s*[,;:]",item)
+    if prefix:
+        tail=item[prefix.end():].strip()
+        # Permit a short explanation after the explicit boolean, but not a
+        # contradictory second yes/no or a longer arbitrary answer.
+        if (tail and len(tail)<=100
+                and not re.search(r"(?i)\\b(?:yes|no|true|false)\\b",tail)
+                and re.fullmatch(r"[A-Za-z][A-Za-z ,;:.'-]*",tail)):
+            return prefix.group(1).casefold()
     # Only extract the LAST RHS of a complete, explicit arithmetic equation.
     if "=" in item:
         expression, scalar = item.rsplit("=", 1)
@@ -52,6 +70,31 @@ def normalize_answer(value:object)->str|None:
                 and re.fullmatch(NUM, scalar)):
             return scalar.replace(",", "")
     return None
+
+
+def canonical_scalar(value:object)->str|None:
+    """Canonicalize an extracted answer exactly (including fractions).
+
+    This is shared by author-code checking and executed-family voting.
+    Approximate decimal agreement belongs to the caller, not this function.
+    """
+    if type(value) is bool:
+        return "yes" if value else "no"
+    if type(value) not in (str,int,float) and value.__class__.__name__!="Decimal":
+        return None
+    scalar=normalize_answer(value) if isinstance(value,str) else normalize_answer(str(value))
+    if scalar in {"yes","true"}:
+        return "yes"
+    if scalar in {"no","false"}:
+        return "no"
+    if scalar=="no solution":
+        return scalar
+    if scalar is None:
+        return None
+    try:
+        return str(Fraction(scalar))
+    except (ValueError,ZeroDivisionError,OverflowError):
+        return None
 
 
 def extract_final_answer(value:object)->str|None:
@@ -207,18 +250,8 @@ def executed_answer_selection(proposals,claims,evidence,verified=None):
     evidence for the author's different stated answer.
     """
     import hashlib
-    from decimal import Decimal,InvalidOperation
     from dataclasses import asdict,is_dataclass
-    def canonical(value):
-        scalar=normalize_answer(value)
-        if scalar in {"yes","true"}:return "yes"
-        if scalar in {"no","false"}:return "no"
-        if scalar is None:return None
-        try:
-            number=Decimal(scalar)
-            return format(number.normalize(),"f") if number.is_finite() else None
-        except InvalidOperation:
-            return None
+    canonical=canonical_scalar
     claim_map={c["id"]:c for c in
                (asdict(c) if is_dataclass(c) else c for c in claims)}
     if verified is not None:
