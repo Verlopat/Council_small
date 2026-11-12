@@ -14,6 +14,9 @@ auditor: gemma
 max_claims: 12
 hunter_cap: 4
 optional:
+  # If Ollama Cloud denies free usage (HTTP 402), use the independent
+  # LLM7 MiniMax family only when your LLM7 key has free access.
+  audit_fallbacks: [minimax]
   coverage_llm: false
   relevance_check: false
   critics: []
