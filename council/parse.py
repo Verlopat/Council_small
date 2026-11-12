@@ -16,8 +16,8 @@ def parse_object(text: str) -> dict[str, Any]:
     # inside prose, math sets, and LaTeX must not shadow the intended reply.
     # Never scan arbitrary indented/nested positions in truncated JSON.
     positions = [m.start(1) for m in re.finditer(
-        r"```(?:json)?\\s*\\n?\\s*(\\{)", raw, re.I)]
-    positions += [m.start() for m in re.finditer(r"(?m)^\\{", raw)]
+        r"```(?:json)?\s*\n?\s*(\{)", raw, re.I)]
+    positions += [m.start() for m in re.finditer(r"(?m)^\{", raw)]
     first = raw.find("{")
     if first >= 0:
         positions.append(first)
