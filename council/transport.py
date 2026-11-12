@@ -60,7 +60,9 @@ class FamilyTransport:
             raise ValueError("COUNCIL_UNCONFIGURED_RPM must be numeric") from None
         if not 1 <= safe_rpm <= 600:
             raise ValueError("COUNCIL_UNCONFIGURED_RPM must be 1..600")
-        self.quota = QuotaScheduler(default_rate=safe_rpm, default_burst=1)
+        self.quota = QuotaScheduler(
+            default_rate=safe_rpm, default_burst=1,
+            daily_state_file=self.cache.path.with_name(".council_daily_quotas.json"))
         # Provider limits are user-confirmed settings, not guessed quotas.
         try:
             configured = json.loads(os.getenv('COUNCIL_LIMITS_JSON', '{}'))
