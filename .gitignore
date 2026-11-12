@@ -16,3 +16,7 @@ api_test_results*.csv
 .council_roles.json
 .council_roles.json.*
 .pytest_cache/
+
+# Provider-level UTC daily accounting (no keys or prompts)
+.council_daily_quotas.json
+.council_daily_quotas.json.lock
