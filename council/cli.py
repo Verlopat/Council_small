@@ -258,8 +258,10 @@ def main(argv=None) -> int:
             replay_deadline=(args.deadline if args.deadline is not None
                 else saved.get("deadline_seconds") or
                      metadata.get("deadline_remaining") or 300.0)
-            budget = RunBudget.start(replay_deadline,
-                 reserve=min(20.0, replay_deadline / 3))
+            replay_reserve=(min(replay_deadline/2, max(20.0,
+                               min(180.0,replay_deadline*0.30)))
+                            if mode=="full" else min(20.0,replay_deadline/3))
+            budget = RunBudget.start(replay_deadline,reserve=replay_reserve)
             if mode == "quick" and metadata.get("pipeline") == "evidence":
                 from council.full import QuickCouncilRunner
                 from council.requirements import Requirements
