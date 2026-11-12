@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import math
 from pathlib import Path
 from council.assignment import Assignment
+from council.families import FAMILIES
 
 @dataclass(frozen=True)
 class CouncilConfig:
