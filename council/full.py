@@ -14,6 +14,8 @@ import re
 from types import SimpleNamespace
 
 from council.assignment import Assignment
+from council.budget import RunBudget
+from council.families import FAMILIES
 from council.dependencies import Dependency
 from council.bus import MessageCap, MessageBus
 from council.evidence import EvidenceRejected
@@ -57,7 +59,7 @@ class FullCouncilRunner(CouncilRunner):
                  auditor_family=AUDITOR,enable_coverage=True,
                  enable_relevance=False,critics=(),adaptive_seeds=False,
                  enable_repairs=True, caps=None, paper_index=None,
-                 solver_strategies=None):
+                 solver_strategies=None, auditor_fallbacks=()):
         # Validate against THIS run's configured roles, not historical
         # CouncilRunner globals (which reserved "glm" as auditor).
         super().__init__(transport,events,budget,solvers=tuple(solvers),
@@ -68,6 +70,13 @@ class FullCouncilRunner(CouncilRunner):
         self.translator_family=translator_family
         self.judge_family=judge_family
         self.auditor_family=auditor_family
+        self.auditor_fallbacks=tuple(auditor_fallbacks)
+        reserved=set(self.solvers) | {self.translator_family,self.judge_family,
+                                     self.auditor_family} | set(critics)
+        if (len(set(self.auditor_fallbacks)) != len(self.auditor_fallbacks)
+                or any(f not in FAMILIES or f in reserved
+                       for f in self.auditor_fallbacks)):
+            raise ValueError("Auditor fallbacks must be known, distinct, unused families")
         self.requirements=requirements
         defaults = {"messages": 5, "verifier_calls": 2,
                     "repairs": 1, "pair_exchanges": 3}
@@ -2019,6 +2028,17 @@ class FullCouncilRunner(CouncilRunner):
             "question_requirements":req.as_data(),
             "argument_map":[{"claim_id":x["claim_id"],"evidence_id":x["evidence_id"]}
                             for x in self.verified]}
+        # Reserve wall-clock time for independently useful final stages.
+        # A slow judge must not starve RFC comparison or the auditor.
+        tail_remaining=self.budget.remaining()
+        audit_reserve=(min(75.0, tail_remaining*0.40)
+                       if mode=="full" and self.auditor_family else 0.0)
+        topic_reserve=(min(90.0, (tail_remaining-audit_reserve)*0.50)
+                       if mode=="full" and rfc_refs else 0.0)
+        if mode=="full":
+            self.events.record("synthesis_stage_reserves",
+                seconds_remaining=tail_remaining,
+                for_audit=audit_reserve,for_rfc_comparison=topic_reserve)
         # Quick mode is a low-quota draft/verification preview, not peer
         # review. Use the deterministic evidence policy by default; opt in
         # to spending a model judge call with COUNCIL_QUICK_LLM_JUDGE=1.
@@ -2037,8 +2057,13 @@ class FullCouncilRunner(CouncilRunner):
             candidate=None
         else:
             # _call already retries a malformed judge response once.
-            candidate=await self._call(
-                self.judge_family,"judge",judge_payload,synthesis=True)
+            original_budget=self.budget
+            self.budget=RunBudget(original_budget.end-audit_reserve-topic_reserve,0.0)
+            try:
+                candidate=await self._call(
+                    self.judge_family,"judge",judge_payload,synthesis=True)
+            finally:
+                self.budget=original_budget
         judge_unavailable=(not local_judge and candidate is None)
         judge_input_too_large=(not local_judge and ledger_view is None)
         if judge_unavailable:
@@ -2103,9 +2128,17 @@ class FullCouncilRunner(CouncilRunner):
              for cid in verdict["blocking"]
              if cid!="composition:1"], self.ledger.claims)
         # Consolidate before the optional auditor spends the remaining quota.
-        topic_consolidation=(await self._consolidate_topics(question,advisory_findings)
-                             if mode=="full" else [])
+        topic_consolidation=[]
+        if mode=="full":
+            original_budget=self.budget
+            self.budget=RunBudget(original_budget.end-audit_reserve,0.0)
+            try:
+                topic_consolidation=await self._consolidate_topics(
+                    question,advisory_findings)
+            finally:
+                self.budget=original_budget
         audit=None
+        audit_family_used=None
         issues=[]
         audit_advisories=[]
         if mode!="quick" and self.auditor_family is not None:
@@ -2130,11 +2163,23 @@ class FullCouncilRunner(CouncilRunner):
                 "reviewer_objections":[{"id":o.id,"claim_id":o.claim_id,
                                         "issue":o.issue}
                                        for o in self.objections]}
-            audit=await self._call(self.auditor_family,"audit",{
+            audit_payload={
                 "question":question,"requirements":req.as_data(),
                 "blind_verdict":{"status":verdict.get("status"),
                                  "blocking":verdict.get("blocking",[])},
-                "research_result":audit_material},synthesis=True)
+                "research_result":audit_material}
+            for family in (self.auditor_family,*self.auditor_fallbacks):
+                if self.budget.remaining()<=1:
+                    break
+                audit=await self._call(
+                    family,"audit",audit_payload,synthesis=True)
+                if audit is not None:
+                    audit_family_used=family
+                    if family!=self.auditor_family:
+                        self.events.record("auditor_fallback_selected",
+                            requested=self.auditor_family,actual=family,
+                            independent=True)
+                    break
         if audit:
             try:
                 issues=string_list(audit,"issues")
@@ -2187,7 +2232,7 @@ class FullCouncilRunner(CouncilRunner):
         # The auditor cannot make an invalid game objection "true" by
         # merely listing it in its JSON. No calls are made without budget.
         audit_objections=self._audit_objection_candidates(
-            issues,self.ledger,self.auditor_family)
+            issues,self.ledger,audit_family_used)
         audit_grounded=(await self._ground_objections(rfc_refs,audit_objections)
                        if audit_objections else {})
         self.grounded_objection_verdicts.update(audit_grounded)
@@ -2293,7 +2338,8 @@ class FullCouncilRunner(CouncilRunner):
                 "valid_proposer_families":[p["family"] for p in proposals],
                 "review_objection_count":len(self.objections),
                 "independent_audit_completed":bool(audit) if mode!="quick" else False,
-                "audit_family":self.auditor_family if mode!="quick" else None},
+                "audit_family":self.auditor_family if mode!="quick" else None,
+                "actual_audit_family":audit_family_used if mode!="quick" else None},
             "warnings":self.warnings}
         if hasattr(self.events,"db") and hasattr(self.events,"run_id"):
             SQLiteLedger(self.events.db).save(self.events.run_id,self.ledger)
