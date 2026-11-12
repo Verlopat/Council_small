@@ -380,6 +380,38 @@ python -m council.cli --mode quick --deadline 180 \
   "Explain VRF full uniqueness, trusted uniqueness, and pseudorandomness games"
 ```
 
+## Full research mode: RFC source, judge budget and audit fallback (November 12)
+
+For explicit VRF game-definition questions (including the plural **VRFs**),
+Full mode now **fails before any provider call** if a complete indexed
+official RFC 9381 (sections 3.1, 3.3, 3.4) is unavailable. This avoids
+spending free API quota on an inherently ungrounded source-comparison run.
+
+```bash
+git pull origin main
+python -m council.rfc_index --db runs/papers.sqlite3
+python -m council.cli --mode full --deadline 600 \
+  --paper-index runs/papers.sqlite3 --run-dir runs/vrf_full_verified_source \
+  --run-id full_1 \
+  "Define full uniqueness, trusted uniqueness, and pseudorandomness for VRFs according to RFC 9381."
+```
+
+For future Full runs, an existing `runs/papers.sqlite3` is detected as
+the default official index. Source-aligned comparisons are **advisory**,
+not proof of a VRF construction or semantic verification.
+
+The debate now retains a larger final-stage time allowance. Blind
+judging, three RFC topic comparisons and independent auditing have separate
+synthesis time boundaries. In `council.yaml`, `optional.audit_fallbacks:
+[minimax]` permits an independent LLM7 MiniMax audit if the primary Ollama
+Gemma auditor fails (e.g., HTTP 402). This fallback is only used when the
+configured LLM7 endpoint is eligible under your *confirmed free allowance*;
+it does not enable paid requests or count MiniMax as a solver quorum vote.
+The structured output records the requested and actual audit families.
+If neither auditor succeeds, auditing remains **unavailable**, not passed.
+Likewise, incomplete or unquoted topic judgments cannot be selected as full
+source-aligned matches. No model-only judgment upgrades claims to verified.
+
 ## RFC 9381 local reference and low-quota definition checking
 
 RFC 9381 §3 is the reference for the game **definitions**, not a generic
