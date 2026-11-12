@@ -6,6 +6,7 @@ current, aligned, independently checked passing evidence.
 from __future__ import annotations
 import re
 from fractions import Fraction
+from decimal import Decimal
 from council.models import ClaimStatus
 
 NUM=r"[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?:[eE][+-]?\d+)?"
@@ -31,8 +32,8 @@ def normalize_answer(value:object)->str|None:
     item=re.sub(r"(?i)^final\s+answer\s*[:=]\s*", "", item).strip()
     item=item.rstrip("!?").strip()
     # Formatting around an explicit scalar is not part of its value.
-    item=re.sub(r"^[$€£]\\s*", "", item)
-    item=re.sub(r"(?<=\\d)\\.$", "", item)
+    item=re.sub(r"^[$€£]\s*", "", item)
+    item=re.sub(r"(?<=\d)\.$", "", item)
     if re.fullmatch(r"(?i)no\s+solutions?(?:\s+exists?)?\.?", item):
         return "no solution"
     if re.fullmatch(NUM, item):
@@ -50,16 +51,16 @@ def normalize_answer(value:object)->str|None:
             return None
     # A number plus one short, nonnumeric unit is still unambiguous.
     # Never treat a second quantity or a modular annotation as a unit.
-    unit=re.fullmatch(rf"({NUM})\\s*[A-Za-z%°][A-Za-z%° ]{{0,30}}\\.?",item)
+    unit=re.fullmatch(rf"({NUM})\s*[A-Za-z%°][A-Za-z%° ]{{0,30}}\.?",item)
     if unit:
         return unit.group(1).replace(",", "")
-    prefix=re.match(r"(?i)(yes|no|true|false)\\s*[,;:]",item)
+    prefix=re.match(r"(?i)(yes|no|true|false)\s*[,;:]",item)
     if prefix:
         tail=item[prefix.end():].strip()
         # Permit a short explanation after the explicit boolean, but not a
         # contradictory second yes/no or a longer arbitrary answer.
         if (tail and len(tail)<=100
-                and not re.search(r"(?i)\\b(?:yes|no|true|false)\\b",tail)
+                and not re.search(r"(?i)\b(?:yes|no|true|false)\b",tail)
                 and re.fullmatch(r"[A-Za-z][A-Za-z ,;:.'-]*",tail)):
             return prefix.group(1).casefold()
     # Only extract the LAST RHS of a complete, explicit arithmetic equation.
@@ -80,7 +81,7 @@ def canonical_scalar(value:object)->str|None:
     """
     if type(value) is bool:
         return "yes" if value else "no"
-    if type(value) not in (str,int,float) and value.__class__.__name__!="Decimal":
+    if type(value) not in (str,int,float,Decimal):
         return None
     scalar=normalize_answer(value) if isinstance(value,str) else normalize_answer(str(value))
     if scalar in {"yes","true"}:
